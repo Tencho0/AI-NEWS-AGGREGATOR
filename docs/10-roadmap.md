@@ -22,11 +22,16 @@ Goal: repo + docs + walking skeleton.
 
 ## Phase 1 — Scraping & storage *(~1 week)*
 
-- [ ] Source model + admin seed for the confirmed source list
-- [ ] RSS adapter; HTML adapter (AngleSharp + readability heuristic); canonical URL + hash dedup
-- [ ] Politeness layer (robots.txt, conditional GET, per-host delay), Polly policies
-- [ ] `ScrapeJob` on schedule; per-source failure isolation + auto-disable
-- [ ] Fixture-based extraction tests for every launch source
+- [x] Source model + repositories (`nw_Source` from Phase 0, migration `0002_source_articles`
+      adds `nw_SourceArticle` + conditional-GET/health columns); the admin **seed** itself is
+      blocked on Q-1 — template ready in `tools/seed-sources.sql`, onboarding steps in
+      `runbooks/add-a-source.md`
+- [x] RSS adapter; HTML adapter (AngleSharp + readability heuristic); canonical URL + hash dedup
+- [x] Politeness layer (robots.txt, conditional GET, per-host delay); resilience via the
+      `Microsoft.Extensions.Http.Resilience` standard handler (retry/circuit breaker/timeout)
+- [x] `ScrapeJob` on schedule; per-source failure isolation + auto-disable
+- [ ] Fixture-based extraction tests for every launch source — generic extraction/canonicalisation/
+      robots fixtures exist; per-launch-source fixtures await the confirmed source list (Q-1)
 - **Milestone M1:** 48 h unattended run collecting the real sources with zero duplicate rows.
 
 ## Phase 2 — Analysis & trend detection *(~1 week)*
@@ -97,3 +102,5 @@ low-risk categories · Playwright for JS-heavy sources · Quartz.NET if scheduli
 | 2026-07-02 | Owner decision: Gemini API (free tier) as default AI provider with easy provider switching → ADR-0005 rejected, ADR-0010 accepted; AI docs, risks and budgets reworked around free-tier quotas. |
 | 2026-07-02 | Owner decision: Gemini only at launch — free-provider research parked (research/2026-07-free-ai-providers.md), Q-9 parked. |
 | 2026-07-02 | **M0 reached.** Solution scaffolded (`Newsroom.slnx`: Core / Infrastructure / Worker / Infrastructure.Tests); migration runner + `0001_initial` (nw_Config, nw_Source, nw_Log, nw_SchemaVersion); Serilog console+file; Windows-Service-capable host with DB heartbeat; verified live: DB auto-created, migration applied once, idempotent re-run, heartbeats persisted. 12 tests green; GitHub Actions CI added. Dev note: local dev machine runs a default SQL instance (`Server=.` in appsettings.Development.json); VPS default stays `.\SQLEXPRESS`. |
+| 2026-07-02 | **Phase 1 live-verified** on a temporary smoke source (deleted afterwards): 31 articles collected with real full-text extraction (2.5–7 k chars/article); repeated full refetches produced zero duplicates; two genuinely new mid-test items picked up incrementally. Found & fixed in the process: full text was fetched before the seen-before check → added batch URL-hash existence check so known articles cost no page fetch (politeness); consequence documented in scraping.md. 46 unit tests green. Remaining for M1: seed real sources (Q-1) and run 48 h unattended. |
+| 2026-07-02 | **Phase 1 implemented** (code complete, M1 not yet reached): migration `0002_source_articles` (`nw_SourceArticle` with UrlHash/ContentHash dedup keys + Etag/LastModifiedHeader/LastSuccessAtUtc on `nw_Source`); scraping core (URL canonicaliser, content hash, feed/extractor/robots/repository interfaces); RSS reader with conditional GET; AngleSharp extractor with `ParserHint` CSS selectors + readability fallback; robots.txt policy (`predelnewsbot` token, 24 h cache); Dapper repositories with MERGE upsert (no duplicate canonical URLs); `ScrapeJob` with per-source failure isolation, politeness delay and auto-disable sweep. Implementation conventions recorded in 05-integrations/scraping.md; source onboarding runbook + seed template added. **Awaits:** Q-1 confirmed source list (seed + per-source fixtures) and the M1 48-hour unattended run. |

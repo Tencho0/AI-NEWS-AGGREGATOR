@@ -1,4 +1,8 @@
+using System.Net;
+using Newsroom.Core.Scraping;
 using Newsroom.Infrastructure.Database;
+using Newsroom.Infrastructure.Repositories;
+using Newsroom.Infrastructure.Scraping;
 using Newsroom.Worker.Jobs;
 using Serilog;
 
@@ -25,9 +29,40 @@ try
     builder.Services.AddSingleton<IDbConnectionFactory>(connectionFactory);
     builder.Services.AddSingleton<MigrationRunner>();
 
+    // Scraping HTTP: honest user agent, decompression, bounded lifetime, standard
+    // Polly-based resilience (retry + circuit breaker + timeouts).
+    var userAgent = builder.Configuration.GetValue(
+        "Scrape:UserAgent", "PredelNewsBot/1.0 (+https://predel.news/bot)");
+    void ConfigureScrapeClient(HttpClient client)
+    {
+        client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", userAgent);
+        client.Timeout = TimeSpan.FromSeconds(30);
+        client.MaxResponseContentBufferSize = HtmlTextExtractor.MaxDownloadBytes;
+    }
+    HttpClientHandler CreateScrapeHandler() => new()
+    {
+        AutomaticDecompression = DecompressionMethods.All,
+        MaxAutomaticRedirections = 5,
+    };
+
+    builder.Services.AddHttpClient<IFeedReader, RssFeedReader>(ConfigureScrapeClient)
+        .ConfigurePrimaryHttpMessageHandler(CreateScrapeHandler)
+        .AddStandardResilienceHandler();
+    builder.Services.AddHttpClient<IArticleTextExtractor, HtmlTextExtractor>(ConfigureScrapeClient)
+        .ConfigurePrimaryHttpMessageHandler(CreateScrapeHandler)
+        .AddStandardResilienceHandler();
+    builder.Services.AddHttpClient(RobotsPolicy.HttpClientName, ConfigureScrapeClient)
+        .ConfigurePrimaryHttpMessageHandler(CreateScrapeHandler)
+        .AddStandardResilienceHandler();
+
+    builder.Services.AddSingleton<IRobotsPolicy, RobotsPolicy>(); // holds the per-host cache
+    builder.Services.AddSingleton<ISourceRepository, SourceRepository>();
+    builder.Services.AddSingleton<ISourceArticleRepository, SourceArticleRepository>();
+
     // Order matters: migrations must complete before any job starts.
     builder.Services.AddHostedService<MigrationStartupService>();
     builder.Services.AddHostedService<HeartbeatService>();
+    builder.Services.AddHostedService<ScrapeJob>();
 
     var host = builder.Build();
     host.Run();

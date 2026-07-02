@@ -1,0 +1,54 @@
+-- =============================================================================
+-- seed-sources.sql — template for seeding dbo.nw_Source (Phase 1, blocked on Q-1)
+--
+-- DO NOT RUN AS-IS. This is a template awaiting the confirmed source list
+-- (open question Q-1, docs/11-risks-and-open-questions.md).
+--
+-- Before uncommenting ANY row below, complete the full onboarding checklist in
+-- docs/runbooks/add-a-source.md for that source — in particular the ToS +
+-- robots.txt check MUST be done and recorded in docs/decision-log.md first.
+-- A source without a recorded ToS check must not be enabled.
+--
+-- Pattern: every insert is guarded by IF NOT EXISTS on Url, so the script is
+-- idempotent — safe to re-run after adding new rows.
+--
+-- Columns (schema: migration 0001_initial):
+--   Name                    display name, shown in logs ("Source <Name>: ...")
+--   Kind                    'rss' only in v1 ('sitemap'/'html' not implemented yet)
+--   Url                     the FEED url, not the homepage
+--   ParserHint              NULL, or 'selector:<css-selector>' when the feed is
+--                           truncated and default extraction picks the wrong block
+--   IntervalMinutes         poll interval: 10 default, 5 hot, 30–60 slow
+--   Enabled                 1 to start polling immediately
+--   PolitenessDelaySeconds  delay between full-text page fetches on this source (>= 10)
+-- =============================================================================
+
+-- ---- Example: BTA (bta.bg) — national wire agency; candidate per scraping.md ----
+-- ToS/robots check recorded in decision-log.md on: <DATE, or do not enable>
+-- IF NOT EXISTS (SELECT 1 FROM dbo.nw_Source WHERE Url = N'<FEED-URL>')
+--     INSERT INTO dbo.nw_Source
+--         (Name, Kind, Url, ParserHint, IntervalMinutes, Enabled, PolitenessDelaySeconds)
+--     VALUES
+--         (N'BTA', N'rss', N'<FEED-URL>', NULL, 10, 1, 10);
+
+-- ---- Example: regional Blagoevgrad outlet (name TBD per Q-1) ----
+-- ToS/robots check recorded in decision-log.md on: <DATE, or do not enable>
+-- IF NOT EXISTS (SELECT 1 FROM dbo.nw_Source WHERE Url = N'<FEED-URL>')
+--     INSERT INTO dbo.nw_Source
+--         (Name, Kind, Url, ParserHint, IntervalMinutes, Enabled, PolitenessDelaySeconds)
+--     VALUES
+--         (N'<Regional outlet name>', N'rss', N'<FEED-URL>',
+--          N'selector:<css-selector>',      -- only if feed is truncated AND extraction is poor
+--          10, 1, 10);
+
+-- ---- Example: municipality press page (slow-moving source) ----
+-- ToS/robots check recorded in decision-log.md on: <DATE, or do not enable>
+-- IF NOT EXISTS (SELECT 1 FROM dbo.nw_Source WHERE Url = N'<FEED-URL>')
+--     INSERT INTO dbo.nw_Source
+--         (Name, Kind, Url, ParserHint, IntervalMinutes, Enabled, PolitenessDelaySeconds)
+--     VALUES
+--         (N'<Municipality name> press', N'rss', N'<FEED-URL>', NULL, 60, 1, 10);
+
+-- Post-seed sanity check:
+-- SELECT Id, Name, Kind, Url, IntervalMinutes, Enabled, PolitenessDelaySeconds
+-- FROM dbo.nw_Source ORDER BY Id;

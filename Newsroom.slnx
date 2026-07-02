@@ -5,6 +5,7 @@
     <Project Path="src/Newsroom.Worker/Newsroom.Worker.csproj" />
   </Folder>
   <Folder Name="/src/tests/">
+    <Project Path="src/tests/Newsroom.Core.Tests/Newsroom.Core.Tests.csproj" />
     <Project Path="src/tests/Newsroom.Infrastructure.Tests/Newsroom.Infrastructure.Tests.csproj" />
   </Folder>
 </Solution>
