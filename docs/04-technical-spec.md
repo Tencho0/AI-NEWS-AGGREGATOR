@@ -54,7 +54,7 @@ metadata rows kept indefinitely.
 
 | Service | What's needed | Owner action |
 |---|---|---|
-| Google AI (Gemini) | API key via AI Studio (free tier — no billing needed initially); check live rate limits in the dashboard | Dev — aistudio.google.com |
+| Google AI (Gemini) | ✅ provisioned 2026-07-02 (dev: `dotnet user-secrets`, see 06-security.md; VPS: env var at deploy). Check live rate limits in the AI Studio dashboard | Done (rotate key when convenient) |
 | (optional, later) other AI provider | API key + billing, only if a stage is switched per ADR-0010 | Owner decision first |
 | Telegram | Bot via @BotFather; editorial group chat id | Editor + dev |
 | Facebook | Meta app, Page access token (`pages_manage_posts`), business verification, app review | Page admin — start early, review takes time (risk R-2) |

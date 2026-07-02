@@ -1,5 +1,7 @@
 using System.Net;
+using Newsroom.Core.Ai;
 using Newsroom.Core.Scraping;
+using Newsroom.Infrastructure.Ai;
 using Newsroom.Infrastructure.Database;
 using Newsroom.Infrastructure.Repositories;
 using Newsroom.Infrastructure.Scraping;
@@ -59,10 +61,20 @@ try
     builder.Services.AddSingleton<ISourceRepository, SourceRepository>();
     builder.Services.AddSingleton<ISourceArticleRepository, SourceArticleRepository>();
 
+    // AI analysis (ADR-0010). The Gemini client is Lazy so a missing API key degrades to a
+    // skipped stage (AnalyseJob guards on key presence) instead of failing host startup.
+    builder.Services.AddSingleton<IAiBudget, AiBudget>();
+    builder.Services.AddSingleton<IAnalysisRepository, AnalysisRepository>();
+    builder.Services.AddSingleton(provider => new Lazy<IAiClient>(() => new GeminiAiClient(
+        GeminiChatClientFactory.Create(builder.Configuration),
+        GeminiAiOptions.From(builder.Configuration),
+        provider.GetRequiredService<ILogger<GeminiAiClient>>())));
+
     // Order matters: migrations must complete before any job starts.
     builder.Services.AddHostedService<MigrationStartupService>();
     builder.Services.AddHostedService<HeartbeatService>();
     builder.Services.AddHostedService<ScrapeJob>();
+    builder.Services.AddHostedService<AnalyseJob>();
 
     var host = builder.Build();
     host.Run();

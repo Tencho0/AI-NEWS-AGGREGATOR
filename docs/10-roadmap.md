@@ -36,11 +36,12 @@ Goal: repo + docs + walking skeleton.
 
 ## Phase 2 — Analysis & trend detection *(~1 week)*
 
-- [ ] AI layer: `IAiClient` over `Microsoft.Extensions.AI.IChatClient`, Gemini adapter
-      (`Google.GenAI`), per-stage provider/model config, RPM throttle, `nw_CostLedger` +
-      daily request/cost budgets (ADR-0010)
-- [ ] `AnalyseJob`: summarise/classify on Gemini Flash, multi-article request packing,
-      structured outputs (JSON schema)
+- [x] AI layer: `IAiClient` over `Microsoft.Extensions.AI.IChatClient`, Gemini adapter
+      (`Google.GenAI` official `AsIChatClient`), per-stage provider/model config, RPM throttle
+      (SlidingWindowRateLimiter), `nw_CostLedger` + daily request budgets (ADR-0010)
+- [x] `AnalyseJob`: summarise/classify on Gemini Flash, multi-article request packing,
+      structured JSON output with robust parsing; poison protection via `AnalysisAttempts`;
+      degrades to no-op with a warning when no API key is configured
 - [ ] Clustering + trend scoring; `TrendJob`; tunable threshold
 - [ ] Backtest against the Phase-1 corpus; tune scoring
 - **Milestone M2:** system flags hot topics that match what an editor would pick (spot-check on a
@@ -102,5 +103,6 @@ low-risk categories · Playwright for JS-heavy sources · Quartz.NET if scheduli
 | 2026-07-02 | Owner decision: Gemini API (free tier) as default AI provider with easy provider switching → ADR-0005 rejected, ADR-0010 accepted; AI docs, risks and budgets reworked around free-tier quotas. |
 | 2026-07-02 | Owner decision: Gemini only at launch — free-provider research parked (research/2026-07-free-ai-providers.md), Q-9 parked. |
 | 2026-07-02 | **M0 reached.** Solution scaffolded (`Newsroom.slnx`: Core / Infrastructure / Worker / Infrastructure.Tests); migration runner + `0001_initial` (nw_Config, nw_Source, nw_Log, nw_SchemaVersion); Serilog console+file; Windows-Service-capable host with DB heartbeat; verified live: DB auto-created, migration applied once, idempotent re-run, heartbeats persisted. 12 tests green; GitHub Actions CI added. Dev note: local dev machine runs a default SQL instance (`Server=.` in appsettings.Development.json); VPS default stays `.\SQLEXPRESS`. |
+| 2026-07-02 | **Phase 2a implemented and live-verified.** AI layer per ADR-0010 (Gemini via official `Google.GenAI` `AsIChatClient` adapter behind `IAiClient`; RPM throttle; daily request budget in `nw_CostLedger`; migration `0003_analysis`) + `AnalyseJob`. Live E2E on the BTA free feed: 20 Bulgarian articles scraped → 3 Gemini batches (`gemini-2.5-flash`, 13,241 in / 4,972 out tokens, $0 free tier) → 20 correct Bulgarian summaries with sensible categories and region scores; a transient BTA 429 on first fetch was absorbed by retry/failure-isolation and recovered on the next cycle. Gemini key provisioned via `dotnet user-secrets` (dev; never in repo — see 06-security.md; rotate when convenient). Log noise fix: `System.Net.Http.HttpClient`/`Polly` Serilog overrides. 51 tests green. Remaining for M2: clustering + trend scoring (`TrendJob`) and backtest. |
 | 2026-07-02 | **Phase 1 live-verified** on a temporary smoke source (deleted afterwards): 31 articles collected with real full-text extraction (2.5–7 k chars/article); repeated full refetches produced zero duplicates; two genuinely new mid-test items picked up incrementally. Found & fixed in the process: full text was fetched before the seen-before check → added batch URL-hash existence check so known articles cost no page fetch (politeness); consequence documented in scraping.md. 46 unit tests green. Remaining for M1: seed real sources (Q-1) and run 48 h unattended. |
 | 2026-07-02 | **Phase 1 implemented** (code complete, M1 not yet reached): migration `0002_source_articles` (`nw_SourceArticle` with UrlHash/ContentHash dedup keys + Etag/LastModifiedHeader/LastSuccessAtUtc on `nw_Source`); scraping core (URL canonicaliser, content hash, feed/extractor/robots/repository interfaces); RSS reader with conditional GET; AngleSharp extractor with `ParserHint` CSS selectors + readability fallback; robots.txt policy (`predelnewsbot` token, 24 h cache); Dapper repositories with MERGE upsert (no duplicate canonical URLs); `ScrapeJob` with per-source failure isolation, politeness delay and auto-disable sweep. Implementation conventions recorded in 05-integrations/scraping.md; source onboarding runbook + seed template added. **Awaits:** Q-1 confirmed source list (seed + per-source fixtures) and the M1 48-hour unattended run. |

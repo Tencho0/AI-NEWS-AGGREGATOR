@@ -16,6 +16,12 @@ Rules: repo contains only `appsettings.json` with placeholders; a `.gitignore`d
 `appsettings.Production.json` template documented in 09-deployment.md; secrets redacted from all
 log output (Serilog destructuring policy); rotation runbook in 07-operations.md.
 
+**Local development:** secrets go into **`dotnet user-secrets`** (Worker project) — stored under
+`%APPDATA%\Microsoft\UserSecrets\`, outside the repo, loaded automatically in the Development
+environment. E.g. `dotnet user-secrets set "Ai:Gemini:ApiKey" "<key>" --project src/Newsroom.Worker`.
+The Gemini key was provisioned this way on 2026-07-02; it also transited a chat session, so
+rotate it in AI Studio at the next convenient moment.
+
 ## Authentication & authorization boundaries
 
 - **Telegram**: allowlist of editor user ids + fixed chat ids; all other updates dropped and
