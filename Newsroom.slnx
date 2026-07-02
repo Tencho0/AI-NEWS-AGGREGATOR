@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Newsroom.Core/Newsroom.Core.csproj" />
+    <Project Path="src/Newsroom.Infrastructure/Newsroom.Infrastructure.csproj" />
+    <Project Path="src/Newsroom.Worker/Newsroom.Worker.csproj" />
+  </Folder>
+  <Folder Name="/src/tests/">
+    <Project Path="src/tests/Newsroom.Infrastructure.Tests/Newsroom.Infrastructure.Tests.csproj" />
+  </Folder>
+</Solution>

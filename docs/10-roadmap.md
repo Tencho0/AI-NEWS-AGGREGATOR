@@ -11,11 +11,14 @@ the breakdowns here are the seed, not the final word.
 
 Goal: repo + docs + walking skeleton.
 - [x] Documentation tree (this) — review and confirm ADRs 0002–0009 with the owner
-- [ ] Resolve blocking open questions: Q-1 sources, Q-2 style guide, Q-3 budget cap
-- [ ] Solution scaffold (`Newsroom.Core/Infrastructure/Worker` + test projects), CI build
-- [ ] `Newsroom` DB + migration runner + first migration (`nw_Source`, `nw_Config`, `nw_Log`)
-- [ ] Serilog wiring; Windows Service host runs and heartbeats
-- **Milestone M0:** empty worker runs as a service on dev, logs, applies migrations.
+- [ ] Resolve blocking open questions: Q-1 sources, Q-2 style guide (Q-3 deferred to Phase 3)
+- [x] Solution scaffold (`Newsroom.Core/Infrastructure/Worker` + Infrastructure tests), CI build
+      (`Newsroom.Core.Tests` deferred until Core gains its first logic in Phase 2)
+- [x] `Newsroom` DB + migration runner + first migration (`nw_Source`, `nw_Config`, `nw_Log`)
+- [x] Serilog wiring; Windows-Service-capable host runs and heartbeats
+- **Milestone M0:** ✅ 2026-07-02 — worker runs on dev (default SQL instance), creates the DB,
+  applies migration 0001 (idempotent on re-run), heartbeats to `nw_Config`, logs to console +
+  rolling file; 12 unit tests green; CI workflow in place. Service-install on the VPS is Phase 7.
 
 ## Phase 1 — Scraping & storage *(~1 week)*
 
@@ -92,3 +95,5 @@ low-risk categories · Playwright for JS-heavy sources · Quartz.NET if scheduli
 |---|---|
 | 2026-07-02 | Project plan + documentation tree created; ADRs 0001–0009 drafted (0002–0009 `Proposed`, awaiting owner confirmation). |
 | 2026-07-02 | Owner decision: Gemini API (free tier) as default AI provider with easy provider switching → ADR-0005 rejected, ADR-0010 accepted; AI docs, risks and budgets reworked around free-tier quotas. |
+| 2026-07-02 | Owner decision: Gemini only at launch — free-provider research parked (research/2026-07-free-ai-providers.md), Q-9 parked. |
+| 2026-07-02 | **M0 reached.** Solution scaffolded (`Newsroom.slnx`: Core / Infrastructure / Worker / Infrastructure.Tests); migration runner + `0001_initial` (nw_Config, nw_Source, nw_Log, nw_SchemaVersion); Serilog console+file; Windows-Service-capable host with DB heartbeat; verified live: DB auto-created, migration applied once, idempotent re-run, heartbeats persisted. 12 tests green; GitHub Actions CI added. Dev note: local dev machine runs a default SQL instance (`Server=.` in appsettings.Development.json); VPS default stays `.\SQLEXPRESS`. |
