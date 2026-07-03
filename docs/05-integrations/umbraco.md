@@ -19,8 +19,13 @@ Add one controller to the **Predel-News** solution (its repo, its release cycle)
 
 ```
 POST /umbraco/management/api/v1/predelnews/publishing/articles
-Authorization: Umbraco API user (client credentials, dedicated "newsroom-bot" user
-               with permissions limited to News section)
+Authorization: Bearer token from the Umbraco back-office token endpoint:
+  POST /umbraco/management/api/v1/security/back-office/token
+  grant_type=client_credentials
+  client_id=umbraco-back-office-newsroom-bot   (Umbraco force-prefixes API-user client ids)
+  client_secret=<from PredelNews:Newsroom:ClientSecret / worker user-secrets>
+The "newsroom-bot" API user + credentials are created programmatically at site startup
+when PredelNews:Newsroom:ClientSecret is configured (NewsroomPublishingSetup).
 ```
 
 Request (multipart or JSON + image URL fetched server-side — final shape decided in Phase 5):
@@ -38,9 +43,17 @@ Request (multipart or JSON + image URL fetched server-side — final shape decid
 ```
 
 The endpoint (server-side, inside the site's invariants):
-1. Idempotency check by `externalRef` (re-post returns the existing result).
+1. Idempotency check by `externalRef` (small `pn_NewsroomPublish` table in the site DB,
+   following the site's existing `pn_` migration pattern; re-post returns the existing result).
 2. Creates the Media item (folder `News/Automated/{yyyy}/{MM}`), validates alt text.
-3. Maps markdown → the site's rich-text format; resolves category/region/tag/author pickers.
+   **Image is optional in the contract** (v1: stock-API keys not yet provisioned) — when absent,
+   a configured **placeholder media item** is used so the mandatory `coverImage` is satisfied;
+   the editor can swap it in the backoffice.
+3. Maps markdown → the site's rich-text value format; resolves pickers: **category by node
+   name** (must stay aligned with `Ai:Categories`), **region by node name** (nullable),
+   **tags find-or-create** under `tagRoot`, **author defaults to the "Predel News" staff
+   author** (created by setup if missing — resolves Q-6 pragmatically; owner may override
+   per-article later).
 4. Generates slug via `ISlugGenerator`; creates content under `newsRoot`;
    sets `articleStatus`, publish date; **publishes** via `IContentPublishingService`.
 5. Returns `{ contentKey, url }`.

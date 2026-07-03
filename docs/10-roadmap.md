@@ -82,11 +82,20 @@ Goal: repo + docs + walking skeleton.
 
 ## Phase 5 — Umbraco publishing *(~1 week, touches both repos)*
 
-- [ ] Publishing endpoint in Predel-News (`PublishingApiController` + API user) per contract
-- [ ] Worker `UmbracoPublisher` + idempotency + retries; contract tests both sides
-- [ ] `PublishJob` for approved drafts; `PublishRecord`; Telegram confirmation with live link
-- **Milestone M5:** approved draft appears correctly on the (dev, then live) site — slug,
-  category, image, SEO fields all right — with no manual steps.
+- [x] Publishing endpoint in Predel-News (`NewsroomPublishingApiController` + programmatic
+      "newsroom-bot" API user + "Predel News" author + placeholder cover media +
+      `pn_NewsroomPublish` idempotency table); value formats evidence-verified against
+      Umbraco 17.2.1 sources and the site's own validators
+- [x] Worker `UmbracoPublisher` (client-credentials token at
+      `/umbraco/management/api/v1/security/back-office/token`, client id force-prefixed
+      `umbraco-back-office-`; token cache; 401 refresh-retry) + per-destination
+      `nw_PublishRecord` (migration 0007); rejections terminal via weighted attempts
+- [x] `PublishJob` for approved drafts; 🚀 Telegram confirmation with live link; ⚠️ alerts on
+      rejection/exhausted retries
+- **Milestone M5:** ✅ 2026-07-03 **on dev** — two approved drafts published end-to-end with no
+  manual steps to a locally-running Predel-News (fresh unattended install): Cyrillic→Latin
+  slugs, category picker, placeholder cover image, SEO fields, live URLs served 200 and
+  confirmed in Telegram. Production deploy of both sides = Phase 7.
 
 ## Phase 6 — Facebook publishing *(~0.5–1 week + Meta review lead time)*
 
@@ -117,6 +126,7 @@ low-risk categories · Playwright for JS-heavy sources · Quartz.NET if scheduli
 | 2026-07-02 | Owner decision: Gemini API (free tier) as default AI provider with easy provider switching → ADR-0005 rejected, ADR-0010 accepted; AI docs, risks and budgets reworked around free-tier quotas. |
 | 2026-07-02 | Owner decision: Gemini only at launch — free-provider research parked (research/2026-07-free-ai-providers.md), Q-9 parked. |
 | 2026-07-02 | **M0 reached.** Solution scaffolded (`Newsroom.slnx`: Core / Infrastructure / Worker / Infrastructure.Tests); migration runner + `0001_initial` (nw_Config, nw_Source, nw_Log, nw_SchemaVersion); Serilog console+file; Windows-Service-capable host with DB heartbeat; verified live: DB auto-created, migration applied once, idempotent re-run, heartbeats persisted. 12 tests green; GitHub Actions CI added. Dev note: local dev machine runs a default SQL instance (`Server=.` in appsettings.Development.json); VPS default stays `.\SQLEXPRESS`. |
+| 2026-07-03 | **M5 reached (dev) — first articles published by the pipeline.** Both halves built in parallel by subagents (Newsroom: migration 0007 + `UmbracoPublisher` + `PublishJob`, 164 tests; Predel-News: `NewsroomPublishingApiController` + programmatic API user/author/placeholder + `pn_NewsroomPublish`, 152 tests, value formats evidence-verified). Live E2E on a fresh local Umbraco install surfaced and fixed three integration issues: (1) token endpoint is `/security/back-office/token` with client id force-prefixed `umbraco-back-office-`; (2) HTTP→HTTPS 307 redirect strips the Authorization header — worker must target the HTTPS endpoint directly; (3) **pre-existing site bug**: the MNTP picker configs stored `startNode.id` as UDI strings where Umbraco 17 requires GUIDs, breaking all content editing over those pickers — fixed in `ContentTreeSetup` with a self-repairing check (production heals on next deploy). Result: 2 articles published (НАТО draft v5 approved by the editor + Атанасова), correct slugs/category/placeholder image, 🚀 Telegram confirmations. Backlog: endpoint should clean up orphaned draft nodes left by mid-creation failures (observed slug suffix -4 from the broken-picker era). **Predel-News repo has uncommitted changes (endpoint + setup + picker fix) — commit both repos.** |
 | 2026-07-03 | **M4 reached — live review loop verified with the editor.** @PredelNewsBot provisioned (Q-8 resolved); ✅ approve path: card → tap → Approved + `nw_ReviewAction` audit + message edit. ✏️ path: instruction «Намали на половина» → Superseded → regeneration → 973-char v2 delivered (57 % shorter). Live testing surfaced and fixed: (1) SEO title/description overflow hard-failed drafts → `DraftValidator.Normalize` auto-truncates at word boundaries; (2) Gemini free-tier quota exhaustion (R-11 materialized) → stages moved to `gemini-3.5-flash` (current gen, fresh per-model quota) and quota errors no longer consume retry attempts; (3) silent regeneration failures → bot now reports them to the chat; (4) tooling incident: PS 5.1 file rewrite corrupted UTF-8 Cyrillic in config → restored from git, re-applied safely, lesson recorded. 150 tests green. |
 | 2026-07-03 | **Phase 4a implemented** (Telegram review loop; migration `0006_review`): review cards (HTML, escaped, inline ✅/✏️/❌), approve/reject with `nw_ReviewAction` audit, change-request conversation → `Superseded` + regeneration version through DraftJob, TTL expiry, `/status /topics /mute /pause /resume` (pause = DB runtime flag read by DraftJob), long polling with persisted offset, allowlist authorization. Telegram.Bot 22.10.1. Runs **dormant without credentials** — verified live: migration applied, exactly one "disabled: not configured" warning, zero errors. Implementation agent crashed mid-run (connection loss) and was resumed to completion — final state independently verified. 148 tests green. **M4 needs Q-8: bot token + review chat id + approver user ids, then a live review pass.** Phase 4b backlog: full-text attachment, image cycling, editor photo upload, `/draft`, admin alert routing. |
 | 2026-07-03 | **Phase 3 implemented and live-verified** (migration `0005_drafts`; style guide drafted from the owner's sample articles and embedded as the prompt source; `GeminiDraftingAi` + `DraftValidator` + self-check; Pexels/Pixabay providers; `DraftJob`). Live E2E: Mediapool scrape → analyse → cluster → topic promoted Hot → **first real draft in 90 s**: ALL-CAPS two-part headline per house style, ~350-word body with attribution and concrete facts, category Политика, confidence 0.9, self-check correctly flagged the disputed claim, both source URLs recorded, status PendingReview. 0 image suggestions (Pixabay/Pexels keys pending — graceful degradation confirmed). 105 tests green. Remaining for M3: golden-set eval with the editor (Q-1/Q-2 review). |

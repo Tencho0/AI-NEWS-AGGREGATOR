@@ -1,12 +1,14 @@
 using System.Net;
 using Newsroom.Core.Ai;
 using Newsroom.Core.Drafting;
+using Newsroom.Core.Publishing;
 using Newsroom.Core.Review;
 using Newsroom.Core.Scraping;
 using Newsroom.Core.Trends;
 using Newsroom.Infrastructure.Ai;
 using Newsroom.Infrastructure.Database;
 using Newsroom.Infrastructure.Images;
+using Newsroom.Infrastructure.Publishing;
 using Newsroom.Infrastructure.Repositories;
 using Newsroom.Infrastructure.Review;
 using Newsroom.Infrastructure.Scraping;
@@ -111,6 +113,15 @@ try
         new TelegramGateway(TelegramOptions.From(builder.Configuration).BotToken
             ?? throw new InvalidOperationException("Telegram:BotToken is not configured."))));
 
+    // Publishing (docs/02-functional-spec.md §6, ADR-0007): Approved drafts go to the Umbraco
+    // site's publishing endpoint over a resilient typed client. PublishJob guards on
+    // configuration, so a missing BaseUrl/secret degrades to a dormant publishing stage.
+    builder.Services.AddSingleton(UmbracoOptions.From(builder.Configuration));
+    builder.Services.AddSingleton<IPublishRepository, PublishRepository>();
+    builder.Services.AddHttpClient<IUmbracoPublisher, UmbracoPublisher>(
+            client => client.Timeout = TimeSpan.FromSeconds(30))
+        .AddStandardResilienceHandler();
+
     // Order matters: migrations must complete before any job starts.
     builder.Services.AddHostedService<MigrationStartupService>();
     builder.Services.AddHostedService<HeartbeatService>();
@@ -119,6 +130,7 @@ try
     builder.Services.AddHostedService<TrendJob>();
     builder.Services.AddHostedService<DraftJob>();
     builder.Services.AddHostedService<TelegramJob>();
+    builder.Services.AddHostedService<PublishJob>();
 
     var host = builder.Build();
     host.Run();
