@@ -1,5 +1,6 @@
 using Newsroom.Core.Ai;
 using Newsroom.Core.Drafting;
+using Newsroom.Core.Operations;
 using Newsroom.Core.Review;
 using Newsroom.Infrastructure.Ai;
 using Newsroom.Infrastructure.Images;
@@ -22,6 +23,7 @@ public sealed class DraftJob(
     IAiBudget budget,
     Lazy<IDraftingAi> draftingAi,
     ImageSuggestionService imageSuggestions,
+    IJobHeartbeat heartbeat,
     IConfiguration configuration,
     ILogger<DraftJob> logger) : BackgroundService
 {
@@ -42,6 +44,7 @@ public sealed class DraftJob(
             do
             {
                 await RunCycleAsync(stoppingToken);
+                await heartbeat.BeatAsync(JobNames.Draft, stoppingToken);
             }
             while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
         }

@@ -1,4 +1,5 @@
 using Newsroom.Core.Ai;
+using Newsroom.Core.Operations;
 using Newsroom.Infrastructure.Ai;
 
 namespace Newsroom.Worker.Jobs;
@@ -13,6 +14,7 @@ public sealed class AnalyseJob(
     IAnalysisRepository repository,
     IAiBudget budget,
     Lazy<IAiClient> aiClient,
+    IJobHeartbeat heartbeat,
     IConfiguration configuration,
     ILogger<AnalyseJob> logger) : BackgroundService
 {
@@ -31,6 +33,7 @@ public sealed class AnalyseJob(
             do
             {
                 await RunCycleAsync(stoppingToken);
+                await heartbeat.BeatAsync(JobNames.Analyse, stoppingToken);
             }
             while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
         }

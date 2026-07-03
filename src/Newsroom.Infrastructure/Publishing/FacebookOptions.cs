@@ -1,0 +1,41 @@
+using Microsoft.Extensions.Configuration;
+
+namespace Newsroom.Infrastructure.Publishing;
+
+/// <summary>
+/// Settings for Facebook page publishing (docs/05-integrations/facebook.md, ADR-0008), bound
+/// from configuration: <c>Facebook:PageId</c>, <c>Facebook:AccessToken</c> (the long-lived page
+/// token; fallback: the <c>FACEBOOK_PAGE_TOKEN</c> environment variable — secrets are not
+/// configuration, docs/06-security.md), the Graph API version, the dry-run switch (default ON,
+/// so a configured token never posts by surprise until DryRun is turned off deliberately) and
+/// the attempt cap. The cycle cadence is owned by PublishJob (Umbraco:CheckSeconds).
+/// </summary>
+public sealed record FacebookOptions
+{
+    public string PageId { get; init; } = "";
+    public string AccessToken { get; init; } = "";
+    public string GraphVersion { get; init; } = "v23.0";
+    public bool DryRun { get; init; } = true;
+    public int MaxAttempts { get; init; } = 3;
+
+    /// <summary>The Facebook leg only runs with a page and a token to post with.</summary>
+    public bool IsConfigured =>
+        !string.IsNullOrWhiteSpace(PageId) && !string.IsNullOrWhiteSpace(AccessToken);
+
+    public static FacebookOptions From(IConfiguration configuration) => new()
+    {
+        PageId = configuration.GetValue("Facebook:PageId", "")!,
+        AccessToken = ResolveAccessToken(configuration),
+        GraphVersion = configuration.GetValue("Facebook:GraphVersion", "v23.0")!,
+        DryRun = configuration.GetValue("Facebook:DryRun", true),
+        MaxAttempts = configuration.GetValue("Facebook:MaxAttempts", 3),
+    };
+
+    private static string ResolveAccessToken(IConfiguration configuration)
+    {
+        var configured = configuration.GetValue("Facebook:AccessToken", "");
+        if (!string.IsNullOrWhiteSpace(configured))
+            return configured!;
+        return Environment.GetEnvironmentVariable("FACEBOOK_PAGE_TOKEN") ?? "";
+    }
+}

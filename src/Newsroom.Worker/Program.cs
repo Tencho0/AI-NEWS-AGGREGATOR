@@ -1,6 +1,7 @@
 using System.Net;
 using Newsroom.Core.Ai;
 using Newsroom.Core.Drafting;
+using Newsroom.Core.Operations;
 using Newsroom.Core.Publishing;
 using Newsroom.Core.Review;
 using Newsroom.Core.Scraping;
@@ -113,17 +114,31 @@ try
         new TelegramGateway(TelegramOptions.From(builder.Configuration).BotToken
             ?? throw new InvalidOperationException("Telegram:BotToken is not configured."))));
 
-    // Publishing (docs/02-functional-spec.md §6, ADR-0007): Approved drafts go to the Umbraco
-    // site's publishing endpoint over a resilient typed client. PublishJob guards on
-    // configuration, so a missing BaseUrl/secret degrades to a dormant publishing stage.
+    // Publishing (docs/02-functional-spec.md §6, ADR-0007/0008): Approved drafts go to the
+    // Umbraco site's publishing endpoint, then a link post to the Facebook page via the Graph
+    // API — both over resilient typed clients. PublishJob guards on configuration, so a
+    // missing BaseUrl/secret degrades to a dormant publishing stage and a missing Facebook
+    // page/token to a site-only one (Facebook:DryRun additionally defaults ON).
     builder.Services.AddSingleton(UmbracoOptions.From(builder.Configuration));
+    builder.Services.AddSingleton(FacebookOptions.From(builder.Configuration));
     builder.Services.AddSingleton<IPublishRepository, PublishRepository>();
     builder.Services.AddHttpClient<IUmbracoPublisher, UmbracoPublisher>(
             client => client.Timeout = TimeSpan.FromSeconds(30))
         .AddStandardResilienceHandler();
+    builder.Services.AddHttpClient<IFacebookPublisher, FacebookPublisher>(
+            client => client.Timeout = TimeSpan.FromSeconds(30))
+        .AddStandardResilienceHandler();
 
-    // Order matters: migrations must complete before any job starts.
+    // Operations (docs/07-operations.md): per-job heartbeats + watchdog alerts, the daily
+    // digest, data retention and the startup crash-recovery sweep. IJobHeartbeat is injected
+    // into every job; the ops jobs share one repository over nw_Config + aggregate queries.
+    builder.Services.AddSingleton<IJobHeartbeat, JobHeartbeat>();
+    builder.Services.AddSingleton<IOperationsRepository, OperationsRepository>();
+
+    // Order matters: migrations must complete before any job starts, and crash recovery must
+    // reset stuck drafts before the jobs that would otherwise skip or re-pick them.
     builder.Services.AddHostedService<MigrationStartupService>();
+    builder.Services.AddHostedService<StartupRecoveryService>();
     builder.Services.AddHostedService<HeartbeatService>();
     builder.Services.AddHostedService<ScrapeJob>();
     builder.Services.AddHostedService<AnalyseJob>();
@@ -131,6 +146,9 @@ try
     builder.Services.AddHostedService<DraftJob>();
     builder.Services.AddHostedService<TelegramJob>();
     builder.Services.AddHostedService<PublishJob>();
+    builder.Services.AddHostedService<WatchdogJob>();
+    builder.Services.AddHostedService<DailyDigestJob>();
+    builder.Services.AddHostedService<RetentionJob>();
 
     var host = builder.Build();
     host.Run();

@@ -1,4 +1,5 @@
 using Newsroom.Core.Ai;
+using Newsroom.Core.Operations;
 using Newsroom.Core.Trends;
 using Newsroom.Infrastructure.Ai;
 
@@ -15,6 +16,7 @@ public sealed class TrendJob(
     ITopicRepository topics,
     IAiBudget budget,
     Lazy<IClusteringAi> clusteringAi,
+    IJobHeartbeat heartbeat,
     IConfiguration configuration,
     ILogger<TrendJob> logger) : BackgroundService
 {
@@ -33,6 +35,7 @@ public sealed class TrendJob(
             do
             {
                 await RunCycleAsync(stoppingToken);
+                await heartbeat.BeatAsync(JobNames.Trend, stoppingToken);
             }
             while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
         }

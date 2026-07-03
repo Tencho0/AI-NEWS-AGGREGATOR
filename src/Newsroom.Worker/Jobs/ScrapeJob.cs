@@ -1,3 +1,4 @@
+using Newsroom.Core.Operations;
 using Newsroom.Core.Scraping;
 
 namespace Newsroom.Worker.Jobs;
@@ -12,6 +13,7 @@ public sealed class ScrapeJob(
     IFeedReader feedReader,
     IArticleTextExtractor textExtractor,
     IRobotsPolicy robots,
+    IJobHeartbeat heartbeat,
     IConfiguration configuration,
     ILogger<ScrapeJob> logger) : BackgroundService
 {
@@ -25,6 +27,7 @@ public sealed class ScrapeJob(
             do
             {
                 await RunCycleAsync(stoppingToken);
+                await heartbeat.BeatAsync(JobNames.Scrape, stoppingToken);
             }
             while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
         }

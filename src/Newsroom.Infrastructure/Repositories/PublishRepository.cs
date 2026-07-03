@@ -12,7 +12,8 @@ namespace Newsroom.Infrastructure.Repositories;
 /// <see cref="IPublishRepository"/> over Dapper. Attempt gating sums nw_PublishRecord.Attempts
 /// per (draft, destination): transient failures weigh 1 and retry next cycles, terminal
 /// rejections are written weighing the whole cap so they never come back. Reaching the cap
-/// flips the draft to PublishFailed in the same transaction (docs/02-functional-spec.md §6).
+/// flips an Approved draft to PublishFailed in the same transaction; a PartiallyPublished
+/// draft (site live, Facebook exhausted) keeps its status (docs/02-functional-spec.md §6).
 /// </summary>
 public sealed class PublishRepository(IDbConnectionFactory db) : IPublishRepository
 {
@@ -69,8 +70,53 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
         return rows.Select(ToArticle).ToList();
     }
 
+    public async Task<IReadOnlyList<FacebookPost>> GetPendingFacebookAsync(
+        int maxAttempts, int maxCount, CancellationToken ct)
+    {
+        using var connection = await db.OpenAsync(ct);
+        var rows = await connection.QueryAsync<FacebookRow>(
+            """
+            SELECT TOP (@maxCount)
+                   d.Id AS DraftId, ISNULL(d.Headline, '') AS Headline,
+                   d.SeoDescription, ISNULL(d.BodyMarkdown, '') AS BodyMarkdown,
+                   site.ExternalUrl AS ArticleUrl
+            FROM dbo.nw_Draft d
+            CROSS APPLY (
+                SELECT TOP 1 p.ExternalUrl
+                FROM dbo.nw_PublishRecord p
+                WHERE p.DraftId = d.Id AND p.Destination = @umbraco
+                  AND p.Status = @succeededStatus AND p.ExternalUrl IS NOT NULL
+                ORDER BY p.Id DESC
+            ) site
+            WHERE d.Status = @partiallyPublishedStatus
+              AND NOT EXISTS (
+                  SELECT 1 FROM dbo.nw_PublishRecord p
+                  WHERE p.DraftId = d.Id AND p.Destination = @facebook
+                    AND p.Status = @succeededStatus)
+              AND ISNULL((
+                  SELECT SUM(p.Attempts) FROM dbo.nw_PublishRecord p
+                  WHERE p.DraftId = d.Id AND p.Destination = @facebook
+                    AND p.Status = @failedStatus), 0) < @maxAttempts
+            ORDER BY d.Id
+            """,
+            new
+            {
+                maxCount,
+                maxAttempts,
+                umbraco = PublishDestinations.Umbraco,
+                facebook = PublishDestinations.Facebook,
+                partiallyPublishedStatus = nameof(DraftStatus.PartiallyPublished),
+                succeededStatus = SucceededStatus,
+                failedStatus = FailedStatus,
+            });
+        return rows.Select(r => new FacebookPost(
+            r.DraftId, r.Headline, FacebookTeaser.Compose(r.SeoDescription, r.BodyMarkdown),
+            r.ArticleUrl)).ToList();
+    }
+
     public async Task RecordSuccessAsync(
-        long draftId, string destination, string externalId, string url, CancellationToken ct)
+        long draftId, string destination, string externalId, string? url,
+        IReadOnlyCollection<string> requiredDestinations, CancellationToken ct)
     {
         using var connection = await db.OpenAsync(ct);
         using var transaction = connection.BeginTransaction();
@@ -90,15 +136,31 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
             },
             transaction);
 
-        // v1 has a single destination, so one success = Published (Phase 6 refines this to
-        // PartiallyPublished while Facebook is still pending).
+        // Published only when every required destination has succeeded; otherwise the site is
+        // live while Facebook is still pending → PartiallyPublished (docs/02-functional-spec §6).
+        // Computed inside the transaction so a concurrent record cannot skew the count.
+        var succeededCount = await connection.ExecuteScalarAsync<int>(
+            """
+            SELECT COUNT(DISTINCT p.Destination) FROM dbo.nw_PublishRecord p
+            WHERE p.DraftId = @draftId AND p.Status = @succeededStatus
+              AND p.Destination IN @requiredDestinations
+            """,
+            new { draftId, succeededStatus = SucceededStatus, requiredDestinations },
+            transaction);
+
         await connection.ExecuteAsync(
             """
             UPDATE dbo.nw_Draft
-            SET Status = @publishedStatus, UpdatedAtUtc = SYSUTCDATETIME()
+            SET Status = @status, UpdatedAtUtc = SYSUTCDATETIME()
             WHERE Id = @draftId
             """,
-            new { draftId, publishedStatus = nameof(DraftStatus.Published) },
+            new
+            {
+                draftId,
+                status = succeededCount >= requiredDestinations.Count
+                    ? nameof(DraftStatus.Published)
+                    : nameof(DraftStatus.PartiallyPublished),
+            },
             transaction);
 
         transaction.Commit();
@@ -201,6 +263,14 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
 
     private static string? Truncate(string? value, int max) =>
         value is null || value.Length <= max ? value : value[..max];
+
+    /// <summary>Dapper row shape of <see cref="GetPendingFacebookAsync"/>.</summary>
+    private sealed record FacebookRow(
+        long DraftId,
+        string Headline,
+        string? SeoDescription,
+        string BodyMarkdown,
+        string ArticleUrl);
 
     /// <summary>Dapper row shape of <see cref="GetApprovedUnpublishedAsync"/>.</summary>
     private sealed record PublishRow(

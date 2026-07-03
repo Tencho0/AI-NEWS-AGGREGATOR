@@ -1,3 +1,4 @@
+using Newsroom.Core.Operations;
 using Newsroom.Core.Review;
 using Newsroom.Infrastructure.Review;
 
@@ -16,6 +17,7 @@ namespace Newsroom.Worker.Jobs;
 public sealed class TelegramJob(
     IReviewRepository reviews,
     Lazy<ITelegramGateway> gateway,
+    IJobHeartbeat heartbeat,
     IConfiguration configuration,
     ILogger<TelegramJob> logger) : BackgroundService
 {
@@ -50,6 +52,7 @@ public sealed class TelegramJob(
                     await DispatchPendingAsync(options, stoppingToken);
                     await SweepExpiredAsync(options, stoppingToken);
                     offset = await PollAsync(options, allowedUsers, offset.Value, stoppingToken);
+                    await heartbeat.BeatAsync(JobNames.Telegram, stoppingToken);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {

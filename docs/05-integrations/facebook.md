@@ -34,6 +34,24 @@ the article URL + a ready-to-paste teaser text, so the editor can share into gro
   health-check job → Telegram alert with re-auth instructions (runbook in 07-operations.md).
 - Token stored as a secret (06-security.md), never in DB or logs.
 
+## Implementation notes (v1 — Phase 6)
+
+- **Dormant without credentials** (`Facebook:PageId` + `Facebook:AccessToken`), like every other
+  stage; **DryRun defaults to ON** — with credentials + DryRun the exact message/link is logged
+  and the flow completes as a success marked "(пробен режим)", which is the staging mode from
+  09-deployment.md.
+- **Status semantics:** Facebook not configured → `Published` on site success alone (site-only
+  operation stays first-class). Facebook configured → site success moves the draft to
+  `PartiallyPublished` until the page post succeeds (then `Published`); the site being live is
+  never blocked or rolled back by Facebook failures. Transient Graph errors retry
+  (`Facebook:MaxAttempts`, default 3); OAuth/permission errors are terminal + alert.
+- **Teaser** = the draft's SEO description (fallback: first ~200 chars of the body as plain
+  text). Post = message "{headline}\n\n{teaser}" + `link` (OG card rendered by FB).
+- **Token health:** daily `GET /{page-id}` probe when configured; failure → ⚠️ Telegram alert
+  pointing at the re-auth runbook. Graph error code 190 during posting raises the same alert.
+- **Group-share helper:** every site-publish confirmation in Telegram includes a copy-paste
+  `<pre>` block (headline + teaser + URL) for manual sharing into the ~28 regional groups.
+
 ## Rate/behaviour limits
 
 Page posting volume is low (a few posts/day) — far under Graph API limits. Still: single retry
