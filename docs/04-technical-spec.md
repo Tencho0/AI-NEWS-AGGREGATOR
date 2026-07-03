@@ -30,7 +30,7 @@ pipeline entities (audit).
 | `nw_SourceArticle` | Scraped items: `Id, SourceId, Url(canonical, unique), Title, Author, PublishedAt, ExtractedText, ContentHash, Status(New/Analysed/Ignored), FirstSeenAt` |
 | `nw_ArticleAnalysis` | 1:1 with SourceArticle: `Summary, Category, RegionScore, EntitiesJson, ModelUsed, TokensIn/Out, Cost` |
 | `nw_Topic` | Clusters: `Id, Label, Status(Emerging/Hot/Muted/Done), Score, FirstSeenAt, LastScoredAt, MutedUntil` |
-| `nw_TopicArticle` | N:M topic ↔ source articles, with similarity score |
+| `nw_TopicArticle` | Topic ↔ article links. **v1 rule: one topic per article** (unique on ArticleId) — makes "unassigned" queries trivial; revisit N:M with similarity scores only if real data demands it |
 | `nw_Draft` | `Id, TopicId, Version, Status(Generating/PendingReview/Approved/Rejected/Expired/Publishing/Published/PartiallyPublished/PublishFailed/GenerationFailed), Headline, Subtitle, BodyMarkdown, Category, Region, TagsJson, SeoTitle, SeoDescription, SourcesJson, PromptVersion, ModelUsed, TokensIn/Out, Cost, CreatedAt` |
 | `nw_DraftImage` | Suggestions per draft: `DraftId, Ordinal, SourceKind(stock/library/ai/editor-upload), Url/LocalPath, Attribution, AltTextBg, Selected(bit)` |
 | `nw_ReviewAction` | Audit of editor actions: `DraftId, TelegramUserId, Action, Comment, At` |

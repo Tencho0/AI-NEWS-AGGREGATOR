@@ -19,3 +19,5 @@ Lightweight decisions (no ADR needed) are recorded here directly.
 | 2026-07-02 | ADR-0010 | Provider-agnostic AI layer via `Microsoft.Extensions.AI.IChatClient`; **Gemini free tier as default provider** (owner decision); quota budgets replace dollar caps as the primary limit | Accepted |
 | 2026-07-02 | research/2026-07-free-ai-providers.md | Free-provider survey: shortlist Groq (analysis overflow) + Mistral Experiment (drafting candidate) + BgGPT/INSAIT (Bulgarian-first); GitHub Models dev-only; skip Cerebras/OpenRouter | Noted |
 | 2026-07-02 | — | **Owner: stay with Gemini API only at launch** — research shortlist parked; no secondary providers wired; provider abstraction (ADR-0010) retained as the escape hatch | Accepted |
+| 2026-07-02 | — | Gemini API key provisioned; stored via `dotnet user-secrets` (dev) / env var (VPS) — never in the repo; rotate when convenient (key transited chat) | Noted |
+| 2026-07-03 | — | Trend v1 simplifications: one topic per article (unique link, no similarity scores); no Hot demotion; trend scoring is pure code (AI only assists clustering) — formula documented in 02-functional-spec.md and `TrendScorer` | Noted |

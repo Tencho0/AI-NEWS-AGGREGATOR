@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
-using System.Threading.RateLimiting;
 
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
@@ -14,13 +13,14 @@ namespace Newsroom.Infrastructure.Ai;
 /// <see cref="IAiClient"/> on top of the provider-neutral <see cref="IChatClient"/> seam
 /// (ADR-0010): the Gemini specifics live in the injected adapter, so tests inject a fake and a
 /// provider switch is a different adapter registration. One request analyses a whole batch
-/// (free-tier quotas are per request) and a sliding-window throttle keeps us under the
-/// free-tier RPM by waiting, never failing.
+/// (free-tier quotas are per request) and the shared <see cref="AiRateLimiter"/> keeps the
+/// whole process under the free-tier RPM by waiting, never failing.
 /// </summary>
 public sealed class GeminiAiClient(
     IChatClient chatClient,
     GeminiAiOptions options,
-    ILogger<GeminiAiClient> logger) : IAiClient, IDisposable
+    AiRateLimiter rateLimiter,
+    ILogger<GeminiAiClient> logger) : IAiClient
 {
     /// <summary>Per-article text cap in the prompt; keeps a full batch inside sane token limits.</summary>
     internal const int MaxArticleTextChars = 4000;
@@ -28,21 +28,12 @@ public sealed class GeminiAiClient(
     private const string FallbackCategory = "Друго";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    private readonly SlidingWindowRateLimiter rateLimiter = new(new SlidingWindowRateLimiterOptions
-    {
-        PermitLimit = options.RequestsPerMinute,
-        Window = TimeSpan.FromMinutes(1),
-        SegmentsPerWindow = 6,
-        QueueLimit = int.MaxValue, // throttled callers wait, they are never rejected
-        QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-    });
-
     public async Task<AiBatchResult> SummariseAndClassifyAsync(
         IReadOnlyList<ArticleForAnalysis> articles, CancellationToken ct)
     {
         ArgumentOutOfRangeException.ThrowIfZero(articles.Count);
 
-        using var lease = await rateLimiter.AcquireAsync(1, ct).ConfigureAwait(false);
+        using var lease = await rateLimiter.AcquireAsync(ct).ConfigureAwait(false);
 
         List<ChatMessage> messages =
         [
@@ -65,8 +56,6 @@ public sealed class GeminiAiClient(
 
         return new AiBatchResult(results, usage);
     }
-
-    public void Dispose() => rateLimiter.Dispose();
 
     private string BuildInstruction() =>
         $$"""
@@ -107,7 +96,7 @@ public sealed class GeminiAiClient(
     private IReadOnlyList<ArticleAnalysisResult> ParseResults(
         string text, IReadOnlyList<ArticleForAnalysis> requested)
     {
-        var json = StripCodeFence(text);
+        var json = AiResponseText.StripCodeFence(text);
 
         List<AnalysisItemDto>? items;
         try
@@ -117,11 +106,11 @@ public sealed class GeminiAiClient(
         catch (JsonException ex)
         {
             throw new InvalidOperationException(
-                $"AI returned malformed JSON for the analysis batch: {Preview(text)}", ex);
+                $"AI returned malformed JSON for the analysis batch: {AiResponseText.Preview(text)}", ex);
         }
         if (items is null)
             throw new InvalidOperationException(
-                $"AI returned no JSON array for the analysis batch: {Preview(text)}");
+                $"AI returned no JSON array for the analysis batch: {AiResponseText.Preview(text)}");
 
         // Ids must come from the request; hallucinated or duplicated ids are dropped and the
         // articles they were meant for stay unanalysed (the job retries them).
@@ -146,24 +135,6 @@ public sealed class GeminiAiClient(
         }
         return results;
     }
-
-    private static string StripCodeFence(string text)
-    {
-        var trimmed = text.Trim();
-        if (!trimmed.StartsWith("```", StringComparison.Ordinal))
-            return trimmed;
-
-        var firstLineEnd = trimmed.IndexOf('\n');
-        if (firstLineEnd < 0)
-            return trimmed;
-
-        var body = trimmed[(firstLineEnd + 1)..];
-        var closingFence = body.LastIndexOf("```", StringComparison.Ordinal);
-        return (closingFence >= 0 ? body[..closingFence] : body).Trim();
-    }
-
-    private static string Preview(string text) =>
-        text.Length <= 200 ? text : text[..200] + "…";
 
     /// <summary>Wire shape of one item in the model's JSON array (camelCase, case-insensitive).</summary>
     private sealed record AnalysisItemDto(

@@ -24,10 +24,16 @@
 - Non-Bulgarian or clearly irrelevant items are marked `Ignored` (kept for audit).
 
 ### 3. Detect trends
-- Clustering: group `SourceArticle`s covering the same story (entity + title similarity,
-  AI-assisted grouping over a sliding window, default 48 h).
-- Trend score per cluster = f(source count, source diversity, velocity, recency, region match).
-- A cluster crossing the trend threshold (configurable) becomes a `Topic` with status `Hot`.
+- Clustering: group `SourceArticle`s covering the same story (AI-assisted grouping over a sliding
+  window, default 48 h; deterministic pre-pass joins exact wire-copy duplicates by content hash
+  without AI cost). One topic per article (v1).
+- Trend score per topic (pure, testable code — no AI): weighted sum of article count (log),
+  source diversity, velocity (articles in the last 6 h) and average region relevance, decayed by
+  the age of the newest article (half-life 12 h). Tunables live in config under `Trend:*`
+  (weights, `HotThreshold` default 6.0, `WindowHours` 48); tuning happens against real data
+  (M2 backtest).
+- A topic crossing `Trend:HotThreshold` becomes `Hot` (muted topics still collect articles and
+  scores but are not promoted). Topics idle past the window become `Done`; no Hot demotion in v1.
 - Manual trigger: the editor can send a Telegram command (`/draft <url or topic>`) to force a
   topic without waiting for the threshold.
 

@@ -70,6 +70,12 @@ Conventions fixed in the Phase 1 code (`src/Newsroom.Core/Scraping`,
   handler (retry, circuit breaker, timeout) instead of hand-rolled Polly policies; 30 s timeout,
   max 5 redirects.
 
+Known refinement (observed with BTA, 2026-07-03): a host that answers **429** gets short Polly
+retries inside one pass and a fresh attempt every poll interval — a source-level cooldown that
+honours `Retry-After` (skip the source for an hour after repeated 429s) would be politer.
+Queued for Phase 7 hardening; the failure-isolation + auto-disable path contains the damage
+meanwhile.
+
 Adding a source = following [`../runbooks/add-a-source.md`](../runbooks/add-a-source.md).
 
 ## Initial source list (Q-1 — to be confirmed by the editor)

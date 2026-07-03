@@ -19,7 +19,9 @@ public class GeminiAiClientTests
             ModelId = "gemini-2.5-flash",
         };
         var fake = new FakeChatClient(response);
-        var client = new GeminiAiClient(fake, options ?? new GeminiAiOptions(), NullLogger<GeminiAiClient>.Instance);
+        var client = new GeminiAiClient(fake, options ?? new GeminiAiOptions(),
+            new AiRateLimiter(requestsPerMinute: 1000), // permissive: throttling is not under test
+            NullLogger<GeminiAiClient>.Instance);
         return (client, fake);
     }
 

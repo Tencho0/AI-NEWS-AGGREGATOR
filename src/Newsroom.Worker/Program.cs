@@ -1,6 +1,7 @@
 using System.Net;
 using Newsroom.Core.Ai;
 using Newsroom.Core.Scraping;
+using Newsroom.Core.Trends;
 using Newsroom.Infrastructure.Ai;
 using Newsroom.Infrastructure.Database;
 using Newsroom.Infrastructure.Repositories;
@@ -61,20 +62,32 @@ try
     builder.Services.AddSingleton<ISourceRepository, SourceRepository>();
     builder.Services.AddSingleton<ISourceArticleRepository, SourceArticleRepository>();
 
-    // AI analysis (ADR-0010). The Gemini client is Lazy so a missing API key degrades to a
-    // skipped stage (AnalyseJob guards on key presence) instead of failing host startup.
+    // AI analysis (ADR-0010). The Gemini clients are Lazy so a missing API key degrades to a
+    // skipped stage (the jobs guard on key presence) instead of failing host startup. One
+    // AiRateLimiter is shared by all stages: the free-tier RPM cap is per key, not per stage.
+    builder.Services.AddSingleton(_ => AiRateLimiter.From(builder.Configuration));
     builder.Services.AddSingleton<IAiBudget, AiBudget>();
     builder.Services.AddSingleton<IAnalysisRepository, AnalysisRepository>();
     builder.Services.AddSingleton(provider => new Lazy<IAiClient>(() => new GeminiAiClient(
         GeminiChatClientFactory.Create(builder.Configuration),
         GeminiAiOptions.From(builder.Configuration),
+        provider.GetRequiredService<AiRateLimiter>(),
         provider.GetRequiredService<ILogger<GeminiAiClient>>())));
+
+    // Trend detection (docs/02-functional-spec.md §3): clustering + scoring over nw_Topic.
+    builder.Services.AddSingleton<ITopicRepository, TopicRepository>();
+    builder.Services.AddSingleton(provider => new Lazy<IClusteringAi>(() => new GeminiClusteringAi(
+        GeminiChatClientFactory.Create(builder.Configuration, "Cluster"),
+        GeminiClusteringOptions.From(builder.Configuration),
+        provider.GetRequiredService<AiRateLimiter>(),
+        provider.GetRequiredService<ILogger<GeminiClusteringAi>>())));
 
     // Order matters: migrations must complete before any job starts.
     builder.Services.AddHostedService<MigrationStartupService>();
     builder.Services.AddHostedService<HeartbeatService>();
     builder.Services.AddHostedService<ScrapeJob>();
     builder.Services.AddHostedService<AnalyseJob>();
+    builder.Services.AddHostedService<TrendJob>();
 
     var host = builder.Build();
     host.Run();
