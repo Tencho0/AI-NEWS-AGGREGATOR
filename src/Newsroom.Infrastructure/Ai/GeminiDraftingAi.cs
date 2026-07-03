@@ -26,7 +26,8 @@ public sealed class GeminiDraftingAi(
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    public async Task<DraftGenerationResult> GenerateAsync(TopicBundle bundle, CancellationToken ct)
+    public async Task<DraftGenerationResult> GenerateAsync(
+        TopicBundle bundle, RegenerationContext? regenContext, CancellationToken ct)
     {
         ArgumentOutOfRangeException.ThrowIfZero(bundle.Articles.Count);
 
@@ -37,6 +38,8 @@ public sealed class GeminiDraftingAi(
             new(ChatRole.System, BuildGenerateInstruction()),
             new(ChatRole.User, BuildBundleBlock(bundle)),
         ];
+        if (regenContext is not null)
+            messages.Add(new ChatMessage(ChatRole.User, BuildRegenerationBlock(regenContext)));
         var chatOptions = new ChatOptions
         {
             ResponseFormat = ChatResponseFormat.Json,
@@ -126,6 +129,18 @@ public sealed class GeminiDraftingAi(
         block.Append("ИЗВОРИ\n\n");
         AppendArticles(block, bundle);
         block.Append("Целева дължина: 250-450 думи.\n");
+        return block.ToString();
+    }
+
+    /// <summary>Extra user-content block for ✏️ Промени: the editor's instructions win over the
+    /// defaults, and the previous version anchors what "промени" is relative to.</summary>
+    private static string BuildRegenerationBlock(RegenerationContext regenContext)
+    {
+        var block = new StringBuilder();
+        block.Append("Редакторът поиска промени по предишната версия. Инструкции: ")
+            .Append(regenContext.Instructions).Append('\n');
+        if (!string.IsNullOrWhiteSpace(regenContext.PreviousBody))
+            block.Append('\n').Append("Предишна версия:\n").Append(regenContext.PreviousBody).Append('\n');
         return block.ToString();
     }
 

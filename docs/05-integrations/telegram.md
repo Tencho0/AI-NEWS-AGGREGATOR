@@ -55,6 +55,21 @@ One message per draft version:
 `/status`, `/draft <url>`, `/topics`, `/mute`, `/pause`, `/resume` — defined in
 [02-functional-spec.md](../02-functional-spec.md). Commands are also allowlist-gated.
 
+## Implementation notes (v1 — Phase 4a)
+
+- Messages use Telegram **HTML parse mode** (all interpolated content escaped); body preview
+  truncated at ~1500 chars on a word boundary. Full-text attachment, 🖼 image cycling,
+  editor photo upload and `/draft <url>` arrive in **Phase 4b**.
+- Change requests: original draft → `Superseded`; new `Generating` row carries
+  `RegenInstructions` + `ParentDraftId`; DraftJob regenerates with the editor's instructions +
+  the previous body as context; the new version is re-dispatched to the chat.
+- `/pause` sets a **runtime flag in the database** (`nw_Config` `Draft:Paused`) read by DraftJob
+  each cycle — no restart needed; scraping/analysis continue while paused.
+- Poll offset persists in `nw_Config` (`Telegram:UpdateOffset`); pending change-conversations in
+  `nw_TelegramPending` (unique per chat+user).
+- Without `Telegram:BotToken`/`ReviewChatId`/`AllowedUserIds` configured, the job logs one
+  warning and stays dormant (mirrors the AI stages' key-less degradation).
+
 ## Failure behaviour
 
 - Telegram API down → jobs continue up to `PendingReview`; delivery retried with backoff;

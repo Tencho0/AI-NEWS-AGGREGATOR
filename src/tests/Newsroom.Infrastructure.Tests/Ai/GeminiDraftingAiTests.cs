@@ -67,7 +67,7 @@ public class GeminiDraftingAiTests
             usage: new UsageDetails { InputTokenCount = 100, OutputTokenCount = 50 },
             options: new GeminiDraftingOptions { InputPricePerMTok = 1m, OutputPricePerMTok = 2m });
 
-        var result = await client.GenerateAsync(Bundle(), CancellationToken.None);
+        var result = await client.GenerateAsync(Bundle(), null, CancellationToken.None);
 
         var content = result.Content;
         Assert.Equal("МОЩЕН ТРУС РАЗТЪРСИ ЮГОЗАПАДА", content.Headline);
@@ -97,7 +97,7 @@ public class GeminiDraftingAiTests
     {
         var (client, fake, _) = CreateClient(ValidDraftJson);
 
-        await client.GenerateAsync(Bundle(), CancellationToken.None);
+        await client.GenerateAsync(Bundle(), null, CancellationToken.None);
 
         var systemPrompt = fake.LastMessages!.Single(m => m.Role == ChatRole.System).Text;
         Assert.Contains("Predel News", systemPrompt);
@@ -115,6 +115,22 @@ public class GeminiDraftingAiTests
     }
 
     [Fact]
+    public async Task Generate_with_regen_context_adds_instructions_and_previous_body_block()
+    {
+        var (client, fake, _) = CreateClient(ValidDraftJson);
+        var regen = new RegenerationContext("Съкрати до 200 думи.", "Старият текст на статията.");
+
+        await client.GenerateAsync(Bundle(), regen, CancellationToken.None);
+
+        var userPrompts = fake.LastMessages!.Where(m => m.Role == ChatRole.User).ToList();
+        Assert.Equal(2, userPrompts.Count); // bundle block + regeneration block
+        Assert.Contains("Редакторът поиска промени", userPrompts[1].Text);
+        Assert.Contains("Съкрати до 200 думи.", userPrompts[1].Text);
+        Assert.Contains("Предишна версия:", userPrompts[1].Text);
+        Assert.Contains("Старият текст на статията.", userPrompts[1].Text);
+    }
+
+    [Fact]
     public async Task Generate_tolerates_markdown_fenced_json_and_missing_fields()
     {
         var (client, _, _) = CreateClient(
@@ -124,7 +140,7 @@ public class GeminiDraftingAiTests
             ```
             """);
 
-        var result = await client.GenerateAsync(Bundle(), CancellationToken.None);
+        var result = await client.GenerateAsync(Bundle(), null, CancellationToken.None);
 
         // Missing fields become empty values — DraftValidator is the quality gate.
         Assert.Equal("ЗАГЛАВИЕ", result.Content.Headline);
@@ -144,7 +160,7 @@ public class GeminiDraftingAiTests
         var (client, _, _) = CreateClient("Sorry, I cannot write this article.");
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => client.GenerateAsync(Bundle(), CancellationToken.None));
+            () => client.GenerateAsync(Bundle(), null, CancellationToken.None));
 
         Assert.Contains("malformed JSON", ex.Message);
         Assert.Contains("Sorry, I cannot write", ex.Message); // payload preview aids debugging
@@ -156,7 +172,7 @@ public class GeminiDraftingAiTests
         var (client, _, _) = CreateClient(ValidDraftJson);
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
-            () => client.GenerateAsync(new TopicBundle(1, "Празна тема", []), CancellationToken.None));
+            () => client.GenerateAsync(new TopicBundle(1, "Празна тема", []), null, CancellationToken.None));
     }
 
     [Fact]

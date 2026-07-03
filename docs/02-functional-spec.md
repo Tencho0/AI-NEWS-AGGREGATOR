@@ -89,7 +89,9 @@
 
 Rules:
 - Only `PendingReview` drafts accept editor actions.
-- A regenerated draft is a **new version** linked to the same topic; old versions are kept.
+- A regenerated draft is a **new version** linked to the same topic; old versions are kept —
+  the replaced version gets status `Superseded` (v1 addition to the state machine), the new one
+  starts at `Generating` with the editor's instructions and returns to `PendingReview`.
 - `Approved` → `Publishing` is automatic and immediate; there is no scheduling in v1
   (scheduled publishing is a candidate for a later phase).
 

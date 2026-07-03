@@ -15,8 +15,11 @@ public sealed record SelfCheckResult(IReadOnlyList<string> UnsupportedClaims, Ai
 public interface IDraftingAi
 {
     /// <summary>Writes one article draft — original synthesis, never a copy — from the topic's
-    /// source articles, following the embedded editorial style guide.</summary>
-    Task<DraftGenerationResult> GenerateAsync(TopicBundle bundle, CancellationToken ct);
+    /// source articles, following the embedded editorial style guide. A non-null
+    /// <paramref name="regenContext"/> adds the editor's change instructions and the previous
+    /// version to the prompt (✏️ Промени regeneration).</summary>
+    Task<DraftGenerationResult> GenerateAsync(
+        TopicBundle bundle, RegenerationContext? regenContext, CancellationToken ct);
 
     /// <summary>Hallucination gate: asks the model which claims in the draft body are not
     /// supported by the sources. The flags are shown to the editor, never auto-acted on.</summary>
@@ -38,7 +41,7 @@ public interface IDraftRepository
 {
     /// <summary>Hot topics that should get a draft: not muted (MutedUntilUtc null or past),
     /// generation attempts below the cap, and no draft in any status other than
-    /// Rejected/Expired/GenerationFailed (those may be re-drafted; anything else is active).</summary>
+    /// Rejected/Expired/GenerationFailed/Superseded (those are history; anything else is active).</summary>
     Task<IReadOnlyList<(long TopicId, string Label)>> GetHotTopicsNeedingDraftAsync(
         int maxAttempts, int maxCount, CancellationToken ct);
 
@@ -67,4 +70,28 @@ public interface IDraftRepository
     /// <returns>True when the topic has now reached <paramref name="maxAttempts"/>.</returns>
     Task<bool> RecordGenerationFailureAsync(
         long topicId, string error, int maxAttempts, CancellationToken ct);
+
+    /// <summary>Generating rows created by ✏️ Промени (RegenInstructions set), each joined to
+    /// its topic and the superseded version's body — the regeneration work queue.</summary>
+    Task<IReadOnlyList<PendingRegeneration>> GetPendingRegenerationsAsync(
+        int maxCount, CancellationToken ct);
+
+    /// <summary>Completes a regeneration by updating the SAME Generating row in place to
+    /// PendingReview (content, usage, SourcesJson from the bundle, images — one transaction).
+    /// TelegramMessageId stays null, so the review surface re-dispatches the new version as a
+    /// fresh message.</summary>
+    Task CompleteRegenerationAsync(
+        long draftId,
+        TopicBundle bundle,
+        DraftContent content,
+        AiUsage usage,
+        IReadOnlyList<string> flaggedClaims,
+        IReadOnlyList<ImageCandidate> images,
+        string promptVersion,
+        CancellationToken ct);
+
+    /// <summary>Marks a regeneration row GenerationFailed with the error. Unlike
+    /// <see cref="RecordGenerationFailureAsync"/> this does NOT touch nw_Topic.DraftAttempts —
+    /// a failed editor-requested rewrite must not poison the topic.</summary>
+    Task FailRegenerationAsync(long draftId, string error, CancellationToken ct);
 }

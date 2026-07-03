@@ -1,12 +1,14 @@
 using System.Net;
 using Newsroom.Core.Ai;
 using Newsroom.Core.Drafting;
+using Newsroom.Core.Review;
 using Newsroom.Core.Scraping;
 using Newsroom.Core.Trends;
 using Newsroom.Infrastructure.Ai;
 using Newsroom.Infrastructure.Database;
 using Newsroom.Infrastructure.Images;
 using Newsroom.Infrastructure.Repositories;
+using Newsroom.Infrastructure.Review;
 using Newsroom.Infrastructure.Scraping;
 using Newsroom.Worker.Jobs;
 using Serilog;
@@ -101,6 +103,14 @@ try
     builder.Services.AddSingleton<IImageProvider, PexelsImageProvider>();
     builder.Services.AddSingleton<ImageSuggestionService>();
 
+    // Telegram editorial review (docs/02-functional-spec.md §5, ADR-0006: long polling). The
+    // gateway is Lazy on the AI-client pattern: TelegramJob guards on configuration, so a
+    // missing bot token degrades to a dormant review stage instead of failing host startup.
+    builder.Services.AddSingleton<IReviewRepository, ReviewRepository>();
+    builder.Services.AddSingleton(_ => new Lazy<ITelegramGateway>(() =>
+        new TelegramGateway(TelegramOptions.From(builder.Configuration).BotToken
+            ?? throw new InvalidOperationException("Telegram:BotToken is not configured."))));
+
     // Order matters: migrations must complete before any job starts.
     builder.Services.AddHostedService<MigrationStartupService>();
     builder.Services.AddHostedService<HeartbeatService>();
@@ -108,6 +118,7 @@ try
     builder.Services.AddHostedService<AnalyseJob>();
     builder.Services.AddHostedService<TrendJob>();
     builder.Services.AddHostedService<DraftJob>();
+    builder.Services.AddHostedService<TelegramJob>();
 
     var host = builder.Build();
     host.Run();

@@ -19,12 +19,14 @@ public sealed class DraftRepository(IDbConnectionFactory db) : IDraftRepository
     };
 
     /// <summary>A draft in any of these statuses is history, not activity — the topic may be
-    /// drafted again. Everything else (Generating..Published) blocks a new draft.</summary>
+    /// drafted again. Everything else (Generating..Published) blocks a new draft. A Superseded
+    /// version is history too: its replacement row is what keeps the topic busy.</summary>
     private static readonly string[] InactiveDraftStatuses =
     [
         nameof(DraftStatus.Rejected),
         nameof(DraftStatus.Expired),
         nameof(DraftStatus.GenerationFailed),
+        nameof(DraftStatus.Superseded),
     ];
 
     public async Task<IReadOnlyList<(long TopicId, string Label)>> GetHotTopicsNeedingDraftAsync(
@@ -135,30 +137,7 @@ public sealed class DraftRepository(IDbConnectionFactory db) : IDraftRepository
             },
             transaction);
 
-        for (var i = 0; i < images.Count; i++)
-        {
-            ct.ThrowIfCancellationRequested();
-            var image = images[i];
-            await connection.ExecuteAsync(
-                """
-                INSERT INTO dbo.nw_DraftImage
-                    (DraftId, Ordinal, SourceKind, Url, ThumbUrl, ProviderName, Attribution, AltTextBg)
-                VALUES
-                    (@draftId, @ordinal, @sourceKind, @url, @thumbUrl, @providerName, @attribution, @altTextBg)
-                """,
-                new
-                {
-                    draftId,
-                    ordinal = i + 1,
-                    sourceKind = "stock", // Phase 3 suggests stock only (ADR-0009 tiers 1/3/4 come later)
-                    url = Truncate(image.Url, 2000),
-                    thumbUrl = Truncate(image.ThumbUrl, 2000),
-                    providerName = Truncate(image.ProviderName, 50),
-                    attribution = Truncate(image.Attribution, 500),
-                    altTextBg = Truncate(content.ImageAltTextBg, 500),
-                },
-                transaction);
-        }
+        await InsertImagesAsync(connection, transaction, draftId, content, images, ct);
 
         transaction.Commit();
         return draftId;
@@ -192,6 +171,131 @@ public sealed class DraftRepository(IDbConnectionFactory db) : IDraftRepository
 
         transaction.Commit();
         return attempts >= maxAttempts;
+    }
+
+    public async Task<IReadOnlyList<PendingRegeneration>> GetPendingRegenerationsAsync(
+        int maxCount, CancellationToken ct)
+    {
+        using var connection = await db.OpenAsync(ct);
+        var rows = await connection.QueryAsync<PendingRegeneration>(
+            """
+            SELECT TOP (@maxCount)
+                   d.Id AS DraftId, CAST(d.TopicId AS bigint) AS TopicId, t.Label AS TopicLabel,
+                   d.RegenInstructions AS Instructions, parent.BodyMarkdown AS PreviousBody
+            FROM dbo.nw_Draft d
+            JOIN dbo.nw_Topic t ON t.Id = d.TopicId
+            LEFT JOIN dbo.nw_Draft parent ON parent.Id = d.ParentDraftId
+            WHERE d.Status = @generatingStatus AND d.RegenInstructions IS NOT NULL
+            ORDER BY d.Id
+            """,
+            new { maxCount, generatingStatus = nameof(DraftStatus.Generating) });
+        return rows.ToList();
+    }
+
+    public async Task CompleteRegenerationAsync(
+        long draftId,
+        TopicBundle bundle,
+        DraftContent content,
+        AiUsage usage,
+        IReadOnlyList<string> flaggedClaims,
+        IReadOnlyList<ImageCandidate> images,
+        string promptVersion,
+        CancellationToken ct)
+    {
+        var sources = bundle.Articles
+            .Select(a => new SourceRef(a.Url, a.SourceName))
+            .ToList();
+
+        using var connection = await db.OpenAsync(ct);
+        using var transaction = connection.BeginTransaction();
+
+        // The SAME row flips to PendingReview; TelegramMessageId stays NULL so the review
+        // surface dispatches the new version as a fresh message.
+        await connection.ExecuteAsync(
+            """
+            UPDATE dbo.nw_Draft
+            SET Status = @status, Headline = @headline, Subtitle = @subtitle,
+                BodyMarkdown = @bodyMarkdown, Category = @category, Region = @region,
+                TagsJson = @tagsJson, SeoTitle = @seoTitle, SeoDescription = @seoDescription,
+                SourcesJson = @sourcesJson, FlaggedClaimsJson = @flaggedClaimsJson,
+                Confidence = @confidence, ImageAltTextBg = @imageAltTextBg,
+                PromptVersion = @promptVersion, Provider = @provider, Model = @model,
+                TokensIn = @tokensIn, TokensOut = @tokensOut, Cost = @cost, Error = NULL,
+                UpdatedAtUtc = SYSUTCDATETIME()
+            WHERE Id = @draftId
+            """,
+            new
+            {
+                draftId,
+                status = nameof(DraftStatus.PendingReview),
+                sourcesJson = JsonSerializer.Serialize(sources, JsonOptions),
+                headline = Truncate(content.Headline, 300),
+                subtitle = Truncate(content.Subtitle, 500),
+                bodyMarkdown = content.BodyMarkdown,
+                category = Truncate(content.Category, 100),
+                region = Truncate(content.Region, 100),
+                tagsJson = JsonSerializer.Serialize(content.Tags, JsonOptions),
+                seoTitle = Truncate(content.SeoTitle, 200),
+                seoDescription = Truncate(content.SeoDescription, 300),
+                flaggedClaimsJson = JsonSerializer.Serialize(flaggedClaims, JsonOptions),
+                confidence = content.Confidence,
+                imageAltTextBg = Truncate(content.ImageAltTextBg, 500),
+                promptVersion,
+                provider = usage.Provider,
+                model = usage.Model,
+                tokensIn = usage.TokensIn,
+                tokensOut = usage.TokensOut,
+                cost = usage.Cost,
+            },
+            transaction);
+
+        await InsertImagesAsync(connection, transaction, draftId, content, images, ct);
+
+        transaction.Commit();
+    }
+
+    public async Task FailRegenerationAsync(long draftId, string error, CancellationToken ct)
+    {
+        using var connection = await db.OpenAsync(ct);
+        // No DraftAttempts increment: a failed editor-requested rewrite must not poison the
+        // topic (the original reviewable version already exists in its history).
+        await connection.ExecuteAsync(
+            """
+            UPDATE dbo.nw_Draft
+            SET Status = @status, Error = @error, UpdatedAtUtc = SYSUTCDATETIME()
+            WHERE Id = @draftId
+            """,
+            new { draftId, status = nameof(DraftStatus.GenerationFailed), error });
+    }
+
+    private static async Task InsertImagesAsync(
+        System.Data.IDbConnection connection, System.Data.IDbTransaction transaction,
+        long draftId, DraftContent content, IReadOnlyList<ImageCandidate> images, CancellationToken ct)
+    {
+        for (var i = 0; i < images.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var image = images[i];
+            await connection.ExecuteAsync(
+                """
+                INSERT INTO dbo.nw_DraftImage
+                    (DraftId, Ordinal, SourceKind, Url, ThumbUrl, ProviderName, Attribution, AltTextBg)
+                VALUES
+                    (@draftId, @ordinal, @sourceKind, @url, @thumbUrl, @providerName, @attribution, @altTextBg)
+                """,
+                new
+                {
+                    draftId,
+                    ordinal = i + 1,
+                    sourceKind = "stock", // stock suggestions only (ADR-0009 tiers 1/3/4 come later)
+                    url = Truncate(image.Url, 2000),
+                    thumbUrl = Truncate(image.ThumbUrl, 2000),
+                    providerName = Truncate(image.ProviderName, 50),
+                    attribution = Truncate(image.Attribution, 500),
+                    altTextBg = Truncate(content.ImageAltTextBg, 500),
+                },
+                transaction);
+        }
     }
 
     /// <summary>Wire shape of one nw_Draft.SourcesJson entry: {"url": ..., "sourceName": ...}.</summary>

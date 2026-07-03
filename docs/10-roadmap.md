@@ -66,12 +66,17 @@ Goal: repo + docs + walking skeleton.
 
 ## Phase 4 — Telegram review loop *(~1 week)*
 
-- [ ] Bot, long polling, allowlist, `nw_TelegramState`
-- [ ] Review message + inline keyboard; approve/reject; TTL expiry
-- [ ] Change-request conversation → regeneration versions; image cycling + editor upload
-- [ ] Commands `/status /draft /topics /mute /pause /resume`; admin alerts
+- [x] Bot, long polling, allowlist, poll offset + pending conversations persisted
+      (`nw_Config`/`nw_TelegramPending`; migration 0006) — **dormant until the owner provisions
+      Telegram:BotToken / ReviewChatId / AllowedUserIds (Q-8)**
+- [x] Review message (HTML, escaped, truncated preview) + inline keyboard ✅/✏️/❌;
+      approve/reject with audit (`nw_ReviewAction`); TTL expiry sweep
+- [x] Change-request conversation → `Superseded` + regeneration version via DraftJob
+      (image cycling + editor photo upload → Phase 4b)
+- [ ] Commands: `/status /topics /mute /pause /resume` done; `/draft` force-draft, full-text
+      attachment and admin alert routing → Phase 4b
 - **Milestone M4:** full review lifecycle exercised on real drafts in the editorial chat
-  (publishing still stubbed).
+  (publishing still stubbed) — **requires the live bot (Q-8) for the end-to-end pass**.
 
 ## Phase 5 — Umbraco publishing *(~1 week, touches both repos)*
 
@@ -110,6 +115,7 @@ low-risk categories · Playwright for JS-heavy sources · Quartz.NET if scheduli
 | 2026-07-02 | Owner decision: Gemini API (free tier) as default AI provider with easy provider switching → ADR-0005 rejected, ADR-0010 accepted; AI docs, risks and budgets reworked around free-tier quotas. |
 | 2026-07-02 | Owner decision: Gemini only at launch — free-provider research parked (research/2026-07-free-ai-providers.md), Q-9 parked. |
 | 2026-07-02 | **M0 reached.** Solution scaffolded (`Newsroom.slnx`: Core / Infrastructure / Worker / Infrastructure.Tests); migration runner + `0001_initial` (nw_Config, nw_Source, nw_Log, nw_SchemaVersion); Serilog console+file; Windows-Service-capable host with DB heartbeat; verified live: DB auto-created, migration applied once, idempotent re-run, heartbeats persisted. 12 tests green; GitHub Actions CI added. Dev note: local dev machine runs a default SQL instance (`Server=.` in appsettings.Development.json); VPS default stays `.\SQLEXPRESS`. |
+| 2026-07-03 | **Phase 4a implemented** (Telegram review loop; migration `0006_review`): review cards (HTML, escaped, inline ✅/✏️/❌), approve/reject with `nw_ReviewAction` audit, change-request conversation → `Superseded` + regeneration version through DraftJob, TTL expiry, `/status /topics /mute /pause /resume` (pause = DB runtime flag read by DraftJob), long polling with persisted offset, allowlist authorization. Telegram.Bot 22.10.1. Runs **dormant without credentials** — verified live: migration applied, exactly one "disabled: not configured" warning, zero errors. Implementation agent crashed mid-run (connection loss) and was resumed to completion — final state independently verified. 148 tests green. **M4 needs Q-8: bot token + review chat id + approver user ids, then a live review pass.** Phase 4b backlog: full-text attachment, image cycling, editor photo upload, `/draft`, admin alert routing. |
 | 2026-07-03 | **Phase 3 implemented and live-verified** (migration `0005_drafts`; style guide drafted from the owner's sample articles and embedded as the prompt source; `GeminiDraftingAi` + `DraftValidator` + self-check; Pexels/Pixabay providers; `DraftJob`). Live E2E: Mediapool scrape → analyse → cluster → topic promoted Hot → **first real draft in 90 s**: ALL-CAPS two-part headline per house style, ~350-word body with attribution and concrete facts, category Политика, confidence 0.9, self-check correctly flagged the disputed claim, both source URLs recorded, status PendingReview. 0 image suggestions (Pixabay/Pexels keys pending — graceful degradation confirmed). 105 tests green. Remaining for M3: golden-set eval with the editor (Q-1/Q-2 review). |
 | 2026-07-03 | **Phase 2b implemented and live-verified** (clustering + trend scoring; migration `0004_topics`). Live chain on Mediapool: 15 articles → analysed → clustered into 14 topics with correct concise Bulgarian story labels; one cross-article join proved story grouping; 2-article topic scored 5.28 (hand-verified against the formula), correctly below the Hot threshold. Per-stage ledger: Cluster requests ~4× cheaper than Analyse. BTA persistently 429'd → failure isolation + auto-disable path exercised; source-level 429 cooldown queued for Phase 7 (scraping.md). 61 tests green. M2 remaining: backtest/tuning on a real corpus (blocked on Q-1). |
 | 2026-07-02 | **Phase 2a implemented and live-verified.** AI layer per ADR-0010 (Gemini via official `Google.GenAI` `AsIChatClient` adapter behind `IAiClient`; RPM throttle; daily request budget in `nw_CostLedger`; migration `0003_analysis`) + `AnalyseJob`. Live E2E on the BTA free feed: 20 Bulgarian articles scraped → 3 Gemini batches (`gemini-2.5-flash`, 13,241 in / 4,972 out tokens, $0 free tier) → 20 correct Bulgarian summaries with sensible categories and region scores; a transient BTA 429 on first fetch was absorbed by retry/failure-isolation and recovered on the next cycle. Gemini key provisioned via `dotnet user-secrets` (dev; never in repo — see 06-security.md; rotate when convenient). Log noise fix: `System.Net.Http.HttpClient`/`Polly` Serilog overrides. 51 tests green. Remaining for M2: clustering + trend scoring (`TrendJob`) and backtest. |
