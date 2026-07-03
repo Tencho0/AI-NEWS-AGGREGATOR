@@ -26,11 +26,13 @@ public class UmbracoPublisherTests
         ClientSecret = "s3cret",
     };
 
+    private static readonly Guid PublishRef = Guid.Parse("0d4a7f3e-9b21-4c55-8e6a-2f1b3c4d5e6f");
+
     private static ArticleToPublish Article(long draftId = 42) => new(
-        draftId, "Заглавие", "Подзаглавие", "Тяло на статията.", "Общество", "Петрич",
+        draftId, PublishRef, "Заглавие", "Подзаглавие", "Тяло на статията.", "Общество", "Петрич",
         ["Петрич", "новини"], "SEO заглавие", "SEO описание",
         new PublishImage("photo.jpg", "https://images.example/photo.jpg",
-            "Площадът в Петрич", "Pexels / John"));
+            "Площадът в Петрич", "Pexels / John", LocalPath: null));
 
     private static (UmbracoPublisher Publisher, RoutingHandler Handler) CreatePublisher(
         Func<RecordedRequest, HttpResponseMessage> respond)
@@ -79,7 +81,9 @@ public class UmbracoPublisherTests
         using var body = JsonDocument.Parse(publish.Body);
         var root = body.RootElement;
 
-        Assert.Equal("newsroom-draft-42", root.GetProperty("externalRef").GetString());
+        // The idempotency ref is the draft's GUID PublishRef, not its row id — identity values
+        // restart on a database rebuild while the site's ledger persists (live incident 2026-07-03).
+        Assert.Equal("newsroom-0d4a7f3e9b214c558e6a2f1b3c4d5e6f", root.GetProperty("externalRef").GetString());
         Assert.Equal("Заглавие", root.GetProperty("headline").GetString());
         Assert.Equal("Подзаглавие", root.GetProperty("subtitle").GetString());
         Assert.Equal("Тяло на статията.", root.GetProperty("bodyMarkdown").GetString());
@@ -97,6 +101,61 @@ public class UmbracoPublisherTests
         Assert.Equal(JsonValueKind.Null, image.GetProperty("bytesBase64").ValueKind);
         Assert.Equal("Площадът в Петрич", image.GetProperty("altText").GetString());
         Assert.Equal("Pexels / John", image.GetProperty("attribution").GetString());
+    }
+
+    [Fact]
+    public async Task An_editor_upload_is_inlined_as_base64_from_its_local_file()
+    {
+        var bytes = new byte[] { 0xFF, 0xD8, 0xFF, 0xE0, 0x01, 0x02 }; // JPEG-ish
+        var localPath = Path.Combine(Path.GetTempPath(), $"nw-editor-{Guid.NewGuid():N}.jpg");
+        await File.WriteAllBytesAsync(localPath, bytes);
+        try
+        {
+            var (publisher, handler) = CreatePublisher(request => request.Path == TokenPath
+                ? Json(HttpStatusCode.OK, TokenJson)
+                : Json(HttpStatusCode.OK, PublishedJson));
+            var article = Article() with
+            {
+                Image = new PublishImage(
+                    Path.GetFileName(localPath), SourceUrl: null, "Площадът в Петрич",
+                    "редакторска снимка", LocalPath: localPath),
+            };
+
+            await publisher.PublishAsync(article, CancellationToken.None);
+
+            var publish = Assert.Single(handler.Requests, r => r.Path == ArticlesPath);
+            using var body = JsonDocument.Parse(publish.Body);
+            var image = body.RootElement.GetProperty("image");
+            Assert.Equal(Convert.ToBase64String(bytes), image.GetProperty("bytesBase64").GetString());
+            Assert.Equal(JsonValueKind.Null, image.GetProperty("sourceUrl").ValueKind);
+            Assert.Equal(Path.GetFileName(localPath), image.GetProperty("fileName").GetString());
+            Assert.Equal("редакторска снимка", image.GetProperty("attribution").GetString());
+        }
+        finally
+        {
+            File.Delete(localPath);
+        }
+    }
+
+    [Fact]
+    public async Task A_missing_editor_upload_file_is_a_permanent_rejection()
+    {
+        var (publisher, handler) = CreatePublisher(request => request.Path == TokenPath
+            ? Json(HttpStatusCode.OK, TokenJson)
+            : Json(HttpStatusCode.OK, PublishedJson));
+        var missingPath = Path.Combine(Path.GetTempPath(), $"nw-editor-{Guid.NewGuid():N}.jpg");
+        var article = Article() with
+        {
+            Image = new PublishImage(
+                "gone.jpg", SourceUrl: null, "алт текст", "редакторска снимка",
+                LocalPath: missingPath),
+        };
+
+        var ex = await Assert.ThrowsAsync<PublishRejectedException>(
+            () => publisher.PublishAsync(article, CancellationToken.None));
+
+        Assert.Contains(missingPath, ex.Message);
+        Assert.DoesNotContain(handler.Requests, r => r.Path == ArticlesPath); // nothing was sent
     }
 
     [Fact]

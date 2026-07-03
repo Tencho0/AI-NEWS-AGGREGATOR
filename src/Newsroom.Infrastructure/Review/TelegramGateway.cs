@@ -29,9 +29,9 @@ public sealed class TelegramGateway(string botToken) : ITelegramGateway
 
         var callbacks = new List<TgCallback>();
         var texts = new List<TgText>();
+        var photos = new List<TgPhoto>();
         foreach (var update in updates)
         {
-            // Phase 4a handles button presses and plain text only; photos etc. come with 4b.
             if (update.CallbackQuery is { Data: { } data, Message: { } cbMessage } callback)
             {
                 callbacks.Add(new TgCallback(
@@ -51,12 +51,26 @@ public sealed class TelegramGateway(string botToken) : ITelegramGateway
                     from.Username ?? from.FirstName,
                     message.Chat.Id,
                     message.MessageId,
-                    text));
+                    text,
+                    message.ReplyToMessage?.MessageId));
+            }
+            else if (update.Message is { Photo.Length: > 0, From: { } sender } photoMessage)
+            {
+                // Telegram sends several PhotoSize variants; the largest is the editor's upload.
+                var largest = photoMessage.Photo.MaxBy(p => (long)p.Width * p.Height)!;
+                photos.Add(new TgPhoto(
+                    update.Id,
+                    sender.Id,
+                    sender.Username ?? sender.FirstName,
+                    photoMessage.Chat.Id,
+                    photoMessage.MessageId,
+                    largest.FileId,
+                    photoMessage.ReplyToMessage?.MessageId));
             }
         }
 
         var nextOffset = updates.Length == 0 ? offset : updates.Max(u => u.Id) + 1L;
-        return new TgUpdateBatch(callbacks, texts, nextOffset);
+        return new TgUpdateBatch(callbacks, texts, photos, nextOffset);
     }
 
     public async Task<long> SendHtmlAsync(
@@ -99,4 +113,67 @@ public sealed class TelegramGateway(string botToken) : ITelegramGateway
 
     public Task AnswerCallbackAsync(string callbackId, string text, CancellationToken ct) =>
         bot.AnswerCallbackQuery(callbackId, text, cancellationToken: ct);
+
+    public async Task<long> SendPhotoAsync(
+        long chatId, string photoUrlOrFileId, string? caption, long? draftIdForCycleButton,
+        int? index, int? total, CancellationToken ct)
+    {
+        // Captions stay plain text (no parse mode): attribution/alt text need no markup.
+        var message = await bot.SendPhoto(
+            chatId,
+            InputFile.FromString(photoUrlOrFileId),
+            caption: WithIndexLine(caption, index, total),
+            replyMarkup: CycleKeyboard(draftIdForCycleButton),
+            cancellationToken: ct);
+        return message.MessageId;
+    }
+
+    public async Task EditPhotoAsync(
+        long chatId, long messageId, string photoUrlOrFileId, string? caption,
+        long? draftIdForCycleButton, CancellationToken ct)
+    {
+        // editMessageMedia accepts URLs and file_ids alike (editor uploads re-show by file_id).
+        var media = new InputMediaPhoto(InputFile.FromString(photoUrlOrFileId))
+        {
+            Caption = caption,
+        };
+        await bot.EditMessageMedia(
+            chatId,
+            (int)messageId,
+            media,
+            replyMarkup: CycleKeyboard(draftIdForCycleButton),
+            cancellationToken: ct);
+    }
+
+    public async Task<string> DownloadFileToAsync(string fileId, string directory, CancellationToken ct)
+    {
+        var file = await bot.GetFile(fileId, ct);
+        var extension = Path.GetExtension(file.FilePath ?? "");
+        if (string.IsNullOrEmpty(extension))
+            extension = ".jpg";
+
+        Directory.CreateDirectory(directory);
+        // FileUniqueId is stable per file content, so a re-sent photo overwrites its own copy.
+        var path = Path.GetFullPath(Path.Combine(directory, file.FileUniqueId + extension));
+        await using (var stream = File.Create(path))
+        {
+            await bot.DownloadFile(file, stream, ct);
+        }
+        return path;
+    }
+
+    /// <summary>The photo message's single-button keyboard: 🖼 → "image:{draftId}".</summary>
+    private static InlineKeyboardMarkup? CycleKeyboard(long? draftId) =>
+        draftId is { } id
+            ? new InlineKeyboardMarkup([
+                [InlineKeyboardButton.WithCallbackData("🖼 Друга снимка", $"image:{id}")],
+            ])
+            : null;
+
+    /// <summary>Appends "{index}/{total}" as the caption's last line — shown instead of a button
+    /// label suffix so the keyboard stays stable while cycling.</summary>
+    private static string? WithIndexLine(string? caption, int? index, int? total) =>
+        index is { } i && total is > 1 and { } t
+            ? string.IsNullOrWhiteSpace(caption) ? $"{i}/{t}" : $"{caption}\n{i}/{t}"
+            : caption;
 }

@@ -5,19 +5,23 @@ namespace Newsroom.Infrastructure.Images;
 /// <summary>
 /// Settings for the stock-image providers (docs/05-integrations/images.md, ADR-0009), bound
 /// from configuration: <c>Images:Pixabay:ApiKey</c> / <c>Images:Pexels:ApiKey</c> (empty =
-/// provider disabled; real keys live in user-secrets, see docs/06) and
-/// <c>Images:MaxSuggestions</c> — how many candidates a draft gets.
+/// provider disabled; real keys live in user-secrets, see docs/06),
+/// <c>Images:MaxSuggestions</c> — how many candidates a draft gets — and
+/// <c>Images:EditorUploadDir</c> — where editor photo uploads land (a relative value is
+/// resolved against the worker's base directory by the consumer).
 /// </summary>
 public sealed record ImagesOptions
 {
     public string PixabayApiKey { get; init; } = "";
     public string PexelsApiKey { get; init; } = "";
     public int MaxSuggestions { get; init; } = 3;
+    public string EditorUploadDir { get; init; } = "editor-uploads";
 
     public static ImagesOptions From(IConfiguration configuration) => new()
     {
         PixabayApiKey = configuration.GetValue("Images:Pixabay:ApiKey", "")!,
         PexelsApiKey = configuration.GetValue("Images:Pexels:ApiKey", "")!,
         MaxSuggestions = configuration.GetValue("Images:MaxSuggestions", 3),
+        EditorUploadDir = configuration.GetValue("Images:EditorUploadDir", "editor-uploads")!,
     };
 }

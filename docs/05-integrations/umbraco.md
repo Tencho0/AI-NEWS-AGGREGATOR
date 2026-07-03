@@ -38,7 +38,9 @@ Request (multipart or JSON + image URL fetched server-side — final shape decid
   "seoTitle": "…", "seoDescription": "…",
   "publishDate": "2026-07-02T10:00:00Z",
   "image": { "fileName": "…", "bytesBase64|sourceUrl": "…", "altText": "…", "attribution": "…" },
-  "externalRef": "newsroom-draft-123"   // idempotency key
+  "externalRef": "newsroom-{PublishRef:N}"   // idempotency key: the draft's GUID PublishRef
+                                             // (NOT the row id — ids restart on a DB rebuild while
+                                             // the site ledger persists; live incident 2026-07-03)
 }
 ```
 

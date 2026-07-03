@@ -56,7 +56,7 @@ public sealed class UmbracoPublisher(HttpClient http, UmbracoOptions options) : 
         using var request = new HttpRequestMessage(
             HttpMethod.Post, Endpoint("umbraco/management/api/v1/predelnews/publishing/articles"));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        request.Content = JsonContent.Create(ToPayload(article), options: JsonOptions);
+        request.Content = JsonContent.Create(await ToPayloadAsync(article, ct), options: JsonOptions);
         return await http.SendAsync(request, ct);
     }
 
@@ -101,8 +101,9 @@ public sealed class UmbracoPublisher(HttpClient http, UmbracoOptions options) : 
 
     private Uri Endpoint(string path) => new($"{options.BaseUrl.TrimEnd('/')}/{path}");
 
-    private static PublishRequest ToPayload(ArticleToPublish article) => new(
-        $"newsroom-draft-{article.DraftId}",
+    private static async Task<PublishRequest> ToPayloadAsync(
+        ArticleToPublish article, CancellationToken ct) => new(
+        $"newsroom-{article.PublishRef:N}",
         article.Headline,
         article.Subtitle,
         article.BodyMarkdown,
@@ -112,11 +113,27 @@ public sealed class UmbracoPublisher(HttpClient http, UmbracoOptions options) : 
         article.SeoTitle,
         article.SeoDescription,
         DateTime.UtcNow, // publish date is the moment of publication (no scheduling in v1)
-        article.Image is null
-            ? null
-            : new ImagePayload(
-                article.Image.FileName, BytesBase64: null, article.Image.SourceUrl,
-                article.Image.AltText, article.Image.Attribution));
+        article.Image is null ? null : await ToImagePayloadAsync(article.Image, ct));
+
+    /// <summary>Stock picks travel by provider URL (the site fetches them server-side); editor
+    /// uploads live only on the worker's disk, so the file is inlined as base64 at publish time
+    /// (Core stays IO-free — the read happens here). A missing file is permanent: the payload
+    /// can never be completed, so it rejects rather than retries.</summary>
+    private static async Task<ImagePayload> ToImagePayloadAsync(PublishImage image, CancellationToken ct)
+    {
+        if (image.LocalPath is null)
+            return new ImagePayload(
+                image.FileName, BytesBase64: null, image.SourceUrl, image.AltText, image.Attribution);
+
+        if (!File.Exists(image.LocalPath))
+            throw new PublishRejectedException(
+                $"Редакторската снимка липсва на диска ({image.LocalPath}) — качи я отново или избери друга.");
+
+        var bytes = await File.ReadAllBytesAsync(image.LocalPath, ct);
+        return new ImagePayload(
+            image.FileName, Convert.ToBase64String(bytes), SourceUrl: null,
+            image.AltText, image.Attribution);
+    }
 
     /// <summary>Problem-details 'detail' (or 'title'), falling back to the raw body — this
     /// text reaches the editor in the failure alert, so favour the most human-readable part.</summary>
@@ -172,8 +189,9 @@ public sealed class UmbracoPublisher(HttpClient http, UmbracoOptions options) : 
         DateTime PublishDateUtc,
         ImagePayload? Image);
 
-    /// <summary>Wire shape of the optional cover image: exactly one of BytesBase64/SourceUrl
-    /// is set — v1 always sends the stock provider URL, fetched server-side by the site.</summary>
+    /// <summary>Wire shape of the optional cover image: exactly one of BytesBase64/SourceUrl is
+    /// set — stock picks send the provider URL (fetched server-side by the site), editor
+    /// uploads send the file contents inline.</summary>
     private sealed record ImagePayload(
         string FileName, string? BytesBase64, string? SourceUrl, string AltText, string? Attribution);
 

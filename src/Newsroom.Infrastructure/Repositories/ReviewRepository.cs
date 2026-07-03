@@ -22,6 +22,10 @@ public sealed class ReviewRepository(IDbConnectionFactory db) : IReviewRepositor
 {
     private const string UpdateOffsetKey = "Telegram:UpdateOffset";
     private const string ChangeInstructionsKind = "ChangeInstructions";
+    /// <summary>nw_DraftImage.SourceKind values (ADR-0009; mirrors PublishRepository).</summary>
+    private const string StockKind = "stock";
+    private const string EditorUploadKind = "editor-upload";
+    private const string EditorUploadAttribution = "редакторска снимка";
     /// <summary>Mirrors HeartbeatService.ConfigKey (the Worker project is not referenced here).</summary>
     private const string HeartbeatKey = "Worker:LastHeartbeatUtc";
 
@@ -98,6 +102,182 @@ public sealed class ReviewRepository(IDbConnectionFactory db) : IReviewRepositor
             WHERE Id = @draftId
             """,
             new { draftId, messageId });
+    }
+
+    public async Task<IReadOnlyList<(long DraftId, string Url, string? Caption, int Total)>> GetPendingPhotoDispatchAsync(
+        int max, CancellationToken ct)
+    {
+        using var connection = await db.OpenAsync(ct);
+        // CROSS APPLY = "has a dispatchable stock image"; the top image mirrors the publish
+        // path's pick (Selected DESC, Ordinal), so the editor reviews what would be published.
+        var rows = await connection.QueryAsync<(long DraftId, string Url, string? Attribution, string? AltTextBg, int Total)>(
+            """
+            SELECT TOP (@max)
+                   d.Id AS DraftId, img.Url, img.Attribution, img.AltTextBg,
+                   (SELECT COUNT(*) FROM dbo.nw_DraftImage dc
+                    WHERE dc.DraftId = d.Id AND dc.SourceKind = @stockKind) AS Total
+            FROM dbo.nw_Draft d
+            CROSS APPLY (
+                SELECT TOP 1 di.Url, di.Attribution, di.AltTextBg
+                FROM dbo.nw_DraftImage di
+                WHERE di.DraftId = d.Id AND di.SourceKind = @stockKind
+                ORDER BY di.Selected DESC, di.Ordinal
+            ) img
+            WHERE d.Status = @pendingStatus
+              AND d.TelegramMessageId IS NOT NULL
+              AND d.TelegramPhotoMessageId IS NULL
+            ORDER BY d.Id
+            """,
+            new { max, stockKind = StockKind, pendingStatus = nameof(DraftStatus.PendingReview) });
+        return rows
+            .Select(r => (r.DraftId, r.Url, ComposeImageCaption(r.Attribution, r.AltTextBg), r.Total))
+            .ToList();
+    }
+
+    public async Task SetTelegramPhotoMessageIdAsync(long draftId, long messageId, CancellationToken ct)
+    {
+        using var connection = await db.OpenAsync(ct);
+        await connection.ExecuteAsync(
+            """
+            UPDATE dbo.nw_Draft
+            SET TelegramPhotoMessageId = @messageId, UpdatedAtUtc = SYSUTCDATETIME()
+            WHERE Id = @draftId
+            """,
+            new { draftId, messageId });
+    }
+
+    public async Task<long?> GetTelegramPhotoMessageIdAsync(long draftId, CancellationToken ct)
+    {
+        using var connection = await db.OpenAsync(ct);
+        return await connection.ExecuteScalarAsync<long?>(
+            """
+            SELECT TelegramPhotoMessageId FROM dbo.nw_Draft WHERE Id = @draftId
+            """,
+            new { draftId });
+    }
+
+    public async Task<(long DraftId, string Url, string? Caption, int Index, int Total)?> CycleToNextImageAsync(
+        long draftId, CancellationToken ct)
+    {
+        using var connection = await db.OpenAsync(ct);
+        using var transaction = connection.BeginTransaction();
+
+        var status = await connection.ExecuteScalarAsync<string?>(
+            """
+            SELECT Status FROM dbo.nw_Draft WHERE Id = @draftId
+            """,
+            new { draftId },
+            transaction);
+        if (status != nameof(DraftStatus.PendingReview))
+            return null; // stale 🖼 press on a resolved draft; transaction rolls back
+
+        var images = (await connection.QueryAsync<(long Id, string SourceKind, string Url, string? Attribution, string? AltTextBg, bool Selected)>(
+            """
+            SELECT di.Id, di.SourceKind, di.Url, di.Attribution, di.AltTextBg, di.Selected
+            FROM dbo.nw_DraftImage di
+            WHERE di.DraftId = @draftId
+            ORDER BY di.Ordinal
+            """,
+            new { draftId },
+            transaction)).ToList();
+
+        var stock = images.Where(i => i.SourceKind == StockKind).ToList();
+        if (stock.Count < 2)
+            return null; // nothing to cycle to
+
+        // Current position: the selected stock image; without one the card shows the lowest
+        // ordinal (advance to the second), unless an editor upload holds the selection — then
+        // cycling returns to the first stock suggestion.
+        var currentIndex = stock.FindIndex(i => i.Selected);
+        var nextIndex = currentIndex >= 0
+            ? (currentIndex + 1) % stock.Count
+            : images.Any(i => i.Selected) ? 0 : 1;
+        var next = stock[nextIndex];
+
+        await connection.ExecuteAsync(
+            """
+            UPDATE dbo.nw_DraftImage SET Selected = 0 WHERE DraftId = @draftId AND Selected = 1;
+            UPDATE dbo.nw_DraftImage SET Selected = 1 WHERE Id = @imageId;
+            """,
+            new { draftId, imageId = next.Id },
+            transaction);
+
+        transaction.Commit();
+        return (draftId, next.Url, ComposeImageCaption(next.Attribution, next.AltTextBg),
+            nextIndex + 1, stock.Count);
+    }
+
+    public async Task<long?> FindDraftByReviewMessageAsync(long messageId, CancellationToken ct)
+    {
+        using var connection = await db.OpenAsync(ct);
+        // Message ids are unique within a chat and there is a single review chat (docs/05).
+        return await connection.ExecuteScalarAsync<long?>(
+            """
+            SELECT TOP 1 Id FROM dbo.nw_Draft
+            WHERE Status = @pendingStatus
+              AND (TelegramMessageId = @messageId OR TelegramPhotoMessageId = @messageId)
+            ORDER BY Id DESC
+            """,
+            new { messageId, pendingStatus = nameof(DraftStatus.PendingReview) });
+    }
+
+    public async Task<bool> AttachEditorImageAsync(
+        long draftId, string localPath, string fileId, long userId, string? userName,
+        CancellationToken ct)
+    {
+        using var connection = await db.OpenAsync(ct);
+        using var transaction = connection.BeginTransaction();
+
+        var isPending = await connection.ExecuteScalarAsync<int>(
+            """
+            SELECT COUNT(*) FROM dbo.nw_Draft WHERE Id = @draftId AND Status = @pendingStatus
+            """,
+            new { draftId, pendingStatus = nameof(DraftStatus.PendingReview) },
+            transaction);
+        if (isPending == 0)
+            return false; // resolved while the photo travelled; transaction rolls back
+
+        // The upload wins selection over every suggestion (docs/05 interaction rules). Url is
+        // the worker-local file the publisher inlines; ThumbUrl keeps the Telegram file_id so
+        // the chat can re-show the photo without re-uploading.
+        await connection.ExecuteAsync(
+            """
+            UPDATE dbo.nw_DraftImage SET Selected = 0 WHERE DraftId = @draftId AND Selected = 1;
+            INSERT INTO dbo.nw_DraftImage (DraftId, Ordinal, SourceKind, Url, ThumbUrl, Attribution, Selected)
+            SELECT @draftId, ISNULL(MAX(di.Ordinal), 0) + 1, @kind, @url, @thumbUrl, @attribution, 1
+            FROM dbo.nw_DraftImage di
+            WHERE di.DraftId = @draftId;
+            """,
+            new
+            {
+                draftId,
+                kind = EditorUploadKind,
+                url = Truncate(localPath, 2000),
+                thumbUrl = Truncate(fileId, 2000),
+                attribution = EditorUploadAttribution,
+            },
+            transaction);
+
+        await InsertReviewActionAsync(
+            connection, transaction, draftId, userId, userName, "ImageAttached", localPath);
+
+        transaction.Commit();
+        return true;
+    }
+
+    /// <summary>The photo message caption: attribution (credit per licence, docs/05
+    /// images.md) plus the Bulgarian alt text; null when the image carries neither.</summary>
+    private static string? ComposeImageCaption(string? attribution, string? altText)
+    {
+        var hasAttribution = !string.IsNullOrWhiteSpace(attribution);
+        var hasAltText = !string.IsNullOrWhiteSpace(altText);
+        return (hasAttribution, hasAltText) switch
+        {
+            (true, true) => $"📷 {attribution}\n{altText}",
+            (true, false) => $"📷 {attribution}",
+            (false, true) => altText,
+            _ => null,
+        };
     }
 
     public Task<bool> TryApproveAsync(long draftId, long userId, string? userName, CancellationToken ct) =>

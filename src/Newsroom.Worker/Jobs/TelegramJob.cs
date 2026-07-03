@@ -1,5 +1,6 @@
 using Newsroom.Core.Operations;
 using Newsroom.Core.Review;
+using Newsroom.Infrastructure.Images;
 using Newsroom.Infrastructure.Review;
 
 namespace Newsroom.Worker.Jobs;
@@ -25,6 +26,10 @@ public sealed class TelegramJob(
     public const string DraftPausedKey = "Draft:Paused";
 
     private const int TopicsToShow = 10;
+
+    /// <summary>Where editor photo uploads land (Images:EditorUploadDir; a relative value is
+    /// resolved against the worker's base directory so publish-time reads find the files).</summary>
+    private readonly string editorUploadDir = ResolveEditorUploadDir(configuration);
 
     private DateTime lastSweepUtc = DateTime.MinValue;
 
@@ -67,7 +72,8 @@ public sealed class TelegramJob(
         }
     }
 
-    /// <summary>(a) Dispatch: every PendingReview draft not yet posted gets its review card.</summary>
+    /// <summary>(a) Dispatch: every PendingReview draft not yet posted gets its review card,
+    /// then every posted card still missing its photo message gets the top image suggestion.</summary>
     private async Task DispatchPendingAsync(TelegramOptions options, CancellationToken ct)
     {
         await ReportFailedRegenerationsAsync(options, ct);
@@ -81,6 +87,28 @@ public sealed class TelegramJob(
             await reviews.SetTelegramMessageIdAsync(view.DraftId, messageId, ct);
             logger.LogInformation("📨 Draft {DraftId} v{Version} posted for review (message {MessageId})",
                 view.DraftId, view.Version, messageId);
+        }
+
+        await DispatchPendingPhotosAsync(options, ct);
+    }
+
+    /// <summary>Posts the photo message with the draft's top image suggestion (docs/05
+    /// telegram.md: attribution in the caption). Drafts without stock images never show up
+    /// here and keep the text-only flow; the 🖼 cycle button only appears when there is
+    /// something to cycle to.</summary>
+    private async Task DispatchPendingPhotosAsync(TelegramOptions options, CancellationToken ct)
+    {
+        var pendingPhotos = await reviews.GetPendingPhotoDispatchAsync(options.MaxSendPerCycle, ct);
+        foreach (var (draftId, url, caption, total) in pendingPhotos)
+        {
+            ct.ThrowIfCancellationRequested();
+            var messageId = await gateway.Value.SendPhotoAsync(
+                options.ReviewChatId, url, caption,
+                draftIdForCycleButton: total >= 2 ? draftId : null, index: null, total, ct);
+            await reviews.SetTelegramPhotoMessageIdAsync(draftId, messageId, ct);
+            logger.LogInformation(
+                "🖼 Draft {DraftId}: image suggestion posted (message {MessageId}, {Total} total)",
+                draftId, messageId, total);
         }
     }
 
@@ -137,16 +165,25 @@ public sealed class TelegramJob(
         var batch = await gateway.Value.GetUpdatesAsync(offset, options.PollTimeoutSeconds, ct);
 
         var ordered = batch.Callbacks
-            .Select(c => (c.UpdateId, Callback: (TgCallback?)c, Text: (TgText?)null))
-            .Concat(batch.Texts.Select(t => (t.UpdateId, Callback: (TgCallback?)null, Text: (TgText?)t)))
+            .Select(c => (c.UpdateId, Update: (object)c))
+            .Concat(batch.Texts.Select(t => (t.UpdateId, Update: (object)t)))
+            .Concat(batch.Photos.Select(p => (p.UpdateId, Update: (object)p)))
             .OrderBy(u => u.UpdateId);
-        foreach (var (_, callback, text) in ordered)
+        foreach (var (_, update) in ordered)
         {
             ct.ThrowIfCancellationRequested();
-            if (callback is not null)
-                await HandleCallbackAsync(callback, options, allowedUsers, ct);
-            else if (text is not null)
-                await HandleTextAsync(text, options, allowedUsers, ct);
+            switch (update)
+            {
+                case TgCallback callback:
+                    await HandleCallbackAsync(callback, options, allowedUsers, ct);
+                    break;
+                case TgText text:
+                    await HandleTextAsync(text, options, allowedUsers, ct);
+                    break;
+                case TgPhoto photo:
+                    await HandlePhotoAsync(photo, options, allowedUsers, ct);
+                    break;
+            }
         }
 
         if (batch.NextOffset != offset)
@@ -175,6 +212,10 @@ public sealed class TelegramJob(
 
             case RequestChanges changes:
                 await StartChangeConversationAsync(callback, changes.DraftId, ct);
+                break;
+
+            case CycleImage cycle:
+                await CycleImageAsync(callback, cycle.DraftId, ct);
                 break;
 
             case Ignore ignore:
@@ -217,15 +258,86 @@ public sealed class TelegramJob(
             $"✏️ Опиши промените за „{draft.Value.Headline}“ с отговор на това съобщение.", ct);
     }
 
+    /// <summary>🖼 pressed on the photo message the button lives on: the repository flips
+    /// Selected to the next stock suggestion and the message is edited in place. A null result
+    /// (resolved draft or nothing to cycle to) only toasts — stale buttons stay harmless.</summary>
+    private async Task CycleImageAsync(TgCallback callback, long draftId, CancellationToken ct)
+    {
+        var next = await reviews.CycleToNextImageAsync(draftId, ct);
+        if (next is not { } selection)
+        {
+            await gateway.Value.AnswerCallbackAsync(callback.CallbackId, "Няма други снимки", ct);
+            return;
+        }
+
+        var caption = selection.Caption is null
+            ? $"{selection.Index}/{selection.Total}"
+            : $"{selection.Caption}\n{selection.Index}/{selection.Total}";
+        await gateway.Value.EditPhotoAsync(
+            callback.ChatId, callback.MessageId, selection.Url, caption,
+            draftIdForCycleButton: draftId, ct);
+        await gateway.Value.AnswerCallbackAsync(
+            callback.CallbackId, $"Снимка {selection.Index}/{selection.Total}", ct);
+        logger.LogInformation("Draft {DraftId}: image cycled to {Index}/{Total}",
+            draftId, selection.Index, selection.Total);
+    }
+
+    /// <summary>An editor photo upload becomes the draft's chosen image when it replies to a
+    /// review card or photo message (docs/05 interaction rules) — the reply's message id
+    /// resolves the draft. Photos without draft context are ignored by the router.</summary>
+    private async Task HandlePhotoAsync(
+        TgPhoto photo, TelegramOptions options, IReadOnlySet<long> allowedUsers, CancellationToken ct)
+    {
+        var draftIdFromReply = photo.ReplyToMessageId is { } replyTo
+            ? await reviews.FindDraftByReviewMessageAsync(replyTo, ct)
+            : null;
+        var command = ReviewUpdateRouter.RoutePhoto(
+            photo, allowedUsers, options.ReviewChatId, draftIdFromReply);
+        if (command is AttachEditorPhoto attach)
+            await AttachEditorPhotoAsync(photo, attach, ct);
+    }
+
+    private async Task AttachEditorPhotoAsync(TgPhoto photo, AttachEditorPhoto attach, CancellationToken ct)
+    {
+        var localPath = await gateway.Value.DownloadFileToAsync(attach.FileId, editorUploadDir, ct);
+        var attached = await reviews.AttachEditorImageAsync(
+            attach.DraftId, localPath, attach.FileId, photo.UserId, photo.UserName, ct);
+        if (!attached)
+        {
+            // Resolved while the photo travelled (docs/05 idempotency rules).
+            await SendTextAsync(photo.ChatId, "Вече обработено.", ct);
+            return;
+        }
+
+        var draft = await reviews.GetDraftHeadlineAsync(attach.DraftId, ct);
+        await SendTextAsync(photo.ChatId,
+            $"📎 Снимката е прикачена и избрана за „{draft?.Headline}“", ct);
+
+        // Show the upload on the draft's photo message (by file_id — no re-upload). The cycle
+        // button stays: pressing it moves the selection back to the stock suggestions.
+        if (await reviews.GetTelegramPhotoMessageIdAsync(attach.DraftId, ct) is { } photoMessageId)
+            await gateway.Value.EditPhotoAsync(
+                photo.ChatId, photoMessageId, attach.FileId, "📷 редакторска снимка",
+                draftIdForCycleButton: attach.DraftId, ct);
+        logger.LogInformation("📎 Draft {DraftId}: editor photo attached by {User} ({Path})",
+            attach.DraftId, photo.UserName ?? photo.UserId.ToString(), localPath);
+    }
+
     private async Task HandleTextAsync(
         TgText text, TelegramOptions options, IReadOnlySet<long> allowedUsers, CancellationToken ct)
     {
+        // A reply to a specific review card beats the open ✏️ conversation (unambiguous when
+        // two drafts await changes); the pending conversation remains the fallback.
+        var draftIdFromReply = text.ReplyToMessageId is { } replyTo
+            ? await reviews.FindDraftByReviewMessageAsync(replyTo, ct)
+            : null;
         var pendingDraftId = await reviews.GetPendingConversationAsync(text.ChatId, text.UserId, ct);
-        var command = ReviewUpdateRouter.RouteText(text, allowedUsers, options.ReviewChatId, pendingDraftId);
+        var command = ReviewUpdateRouter.RouteText(
+            text, allowedUsers, options.ReviewChatId, pendingDraftId, draftIdFromReply);
         switch (command)
         {
             case SubmitChangeInstructions submit:
-                await SubmitChangeInstructionsAsync(text, submit, ct);
+                await SubmitChangeInstructionsAsync(text, submit, pendingDraftId, ct);
                 break;
 
             case ShowStatus:
@@ -262,12 +374,15 @@ public sealed class TelegramJob(
     }
 
     private async Task SubmitChangeInstructionsAsync(
-        TgText text, SubmitChangeInstructions submit, CancellationToken ct)
+        TgText text, SubmitChangeInstructions submit, long? pendingDraftId, CancellationToken ct)
     {
         var started = await reviews.TryStartRegenerationAsync(
             submit.DraftId, submit.Instructions, text.UserId, text.UserName, ct);
-        // Clear on both outcomes: a dead conversation must not keep swallowing messages.
-        await reviews.ClearPendingConversationAsync(text.ChatId, text.UserId, ct);
+        // Clear on both outcomes: a dead conversation must not keep swallowing messages. But a
+        // reply bound to a DIFFERENT draft leaves the open ✏️ conversation intact — the editor
+        // was promised their next plain message goes to that draft.
+        if (pendingDraftId is null || pendingDraftId == submit.DraftId)
+            await reviews.ClearPendingConversationAsync(text.ChatId, text.UserId, ct);
         if (!started)
         {
             await SendTextAsync(text.ChatId, "Вече обработено.", ct);
@@ -302,4 +417,10 @@ public sealed class TelegramJob(
     private Task SendTextAsync(long chatId, string text, CancellationToken ct) =>
         gateway.Value.SendHtmlAsync(
             chatId, ReviewMessageRenderer.Escape(text), withReviewButtons: false, draftIdForButtons: null, ct);
+
+    private static string ResolveEditorUploadDir(IConfiguration configuration)
+    {
+        var dir = ImagesOptions.From(configuration).EditorUploadDir;
+        return Path.IsPathRooted(dir) ? dir : Path.Combine(AppContext.BaseDirectory, dir);
+    }
 }

@@ -15,14 +15,24 @@ public class ReviewUpdateRouterTests
         new(UpdateId: 1, CallbackId: "cb-1", UserId: userId, UserName: "ivan", ChatId: chatId,
             MessageId: 77, Data: data);
 
-    private static TgText Text(string text, long userId = Editor, long chatId = ReviewChat) =>
-        new(UpdateId: 2, UserId: userId, UserName: "ivan", ChatId: chatId, MessageId: 78, Text: text);
+    private static TgText Text(
+        string text, long userId = Editor, long chatId = ReviewChat, long? replyToMessageId = null) =>
+        new(UpdateId: 2, UserId: userId, UserName: "ivan", ChatId: chatId, MessageId: 78, Text: text,
+            ReplyToMessageId: replyToMessageId);
+
+    private static TgPhoto Photo(long userId = Editor, long chatId = ReviewChat) =>
+        new(UpdateId: 3, UserId: userId, UserName: "ivan", ChatId: chatId, MessageId: 79,
+            FileId: "file-abc", ReplyToMessageId: 55);
 
     private static ReviewCommand RouteCallback(TgCallback c) =>
         ReviewUpdateRouter.RouteCallback(c, Allowed, ReviewChat);
 
-    private static ReviewCommand RouteText(TgText t, long? pendingDraftId = null) =>
-        ReviewUpdateRouter.RouteText(t, Allowed, ReviewChat, pendingDraftId);
+    private static ReviewCommand RouteText(
+        TgText t, long? pendingDraftId = null, long? draftIdFromReply = null) =>
+        ReviewUpdateRouter.RouteText(t, Allowed, ReviewChat, pendingDraftId, draftIdFromReply);
+
+    private static ReviewCommand RoutePhoto(TgPhoto p, long? draftIdFromReply) =>
+        ReviewUpdateRouter.RoutePhoto(p, Allowed, ReviewChat, draftIdFromReply);
 
     [Fact]
     public void Callback_approve_reject_changes_route_to_typed_commands()
@@ -30,6 +40,21 @@ public class ReviewUpdateRouterTests
         Assert.Equal(new ApproveDraft(42), RouteCallback(Callback("approve:42")));
         Assert.Equal(new RejectDraft(42), RouteCallback(Callback("reject:42")));
         Assert.Equal(new RequestChanges(42), RouteCallback(Callback("changes:42")));
+    }
+
+    [Fact]
+    public void Image_callback_routes_to_CycleImage()
+    {
+        Assert.Equal(new CycleImage(42), RouteCallback(Callback("image:42")));
+    }
+
+    [Fact]
+    public void Image_callback_is_gated_like_every_other_callback()
+    {
+        Assert.Equal(new Ignore(ReviewUpdateRouter.ReasonNotAllowlisted),
+            RouteCallback(Callback("image:42", userId: Stranger)));
+        Assert.Equal(new Ignore(ReviewUpdateRouter.ReasonWrongChat),
+            RouteCallback(Callback("image:42", chatId: OtherChat)));
     }
 
     [Fact]
@@ -67,6 +92,59 @@ public class ReviewUpdateRouterTests
         var command = RouteText(Text("  Съкрати и добави цитат от кмета.  "), pendingDraftId: 42);
 
         Assert.Equal(new SubmitChangeInstructions(42, "Съкрати и добави цитат от кмета."), command);
+    }
+
+    [Fact]
+    public void Reply_bound_instructions_prefer_the_replied_draft_over_the_pending_conversation()
+    {
+        // Two drafts await changes: the reply pins the instructions to card #7, not pending #42.
+        var command = RouteText(
+            Text("Смени заглавието.", replyToMessageId: 55), pendingDraftId: 42, draftIdFromReply: 7);
+
+        Assert.Equal(new SubmitChangeInstructions(7, "Смени заглавието."), command);
+    }
+
+    [Fact]
+    public void Reply_bound_text_without_pending_conversation_still_becomes_instructions()
+    {
+        var command = RouteText(
+            Text("Добави източник.", replyToMessageId: 55), pendingDraftId: null, draftIdFromReply: 7);
+
+        Assert.Equal(new SubmitChangeInstructions(7, "Добави източник."), command);
+    }
+
+    [Fact]
+    public void Reply_bound_command_still_routes_as_command()
+    {
+        Assert.Equal(new ShowStatus(),
+            RouteText(Text("/status", replyToMessageId: 55), pendingDraftId: 42, draftIdFromReply: 7));
+    }
+
+    [Fact]
+    public void Photo_reply_to_a_review_card_becomes_AttachEditorPhoto()
+    {
+        Assert.Equal(new AttachEditorPhoto(7, "file-abc"), RoutePhoto(Photo(), draftIdFromReply: 7));
+    }
+
+    [Fact]
+    public void Photo_without_draft_context_is_ignored()
+    {
+        Assert.Equal(new Ignore(ReviewUpdateRouter.ReasonNoDraftContext),
+            RoutePhoto(Photo(), draftIdFromReply: null));
+    }
+
+    [Fact]
+    public void Photo_from_non_allowlisted_user_is_ignored()
+    {
+        Assert.Equal(new Ignore(ReviewUpdateRouter.ReasonNotAllowlisted),
+            RoutePhoto(Photo(userId: Stranger), draftIdFromReply: 7));
+    }
+
+    [Fact]
+    public void Photo_from_wrong_chat_is_ignored_even_for_editors()
+    {
+        Assert.Equal(new Ignore(ReviewUpdateRouter.ReasonWrongChat),
+            RoutePhoto(Photo(chatId: OtherChat), draftIdFromReply: 7));
     }
 
     [Fact]

@@ -70,5 +70,5 @@ Scraped content is **untrusted input**:
 | Compromised bot token → fake approvals | User-id allowlist (token alone is insufficient), audit log, secret rotation |
 | Publishing endpoint abuse | Client-credentials auth, least-privilege API user, rate cap, payload validation |
 | Cost/quota blow-up (runaway loop / model misuse) | Daily request + cost budgets checked in `nw_CostLedger` before every call; per-stage token limits; client-side RPM throttle |
-| Duplicate publishes on retry | Idempotency keys end-to-end (draft id → externalRef → FB record) |
+| Duplicate publishes on retry | Idempotency keys end-to-end (draft PublishRef GUID → externalRef → FB record); GUID rather than row id so keys survive database rebuilds |
 | VPS compromise | Standard hardening is site ops scope; worker adds no inbound ports (long polling only) |

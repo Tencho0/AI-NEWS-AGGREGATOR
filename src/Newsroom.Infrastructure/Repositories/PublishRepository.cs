@@ -21,8 +21,8 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
     private const string SucceededStatus = "Succeeded";
     private const string FailedStatus = "Failed";
 
-    /// <summary>Editor uploads carry Telegram file_ids the site cannot fetch, so a draft whose
-    /// chosen image is one publishes without an image in v1 (the endpoint's placeholder kicks in).</summary>
+    /// <summary>Editor uploads store a worker-local file path in Url (downloaded from Telegram
+    /// at attach time); the publisher inlines the file as base64 since the site cannot fetch it.</summary>
     private const string EditorUploadKind = "editor-upload";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -34,7 +34,7 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
         var rows = await connection.QueryAsync<PublishRow>(
             """
             SELECT TOP (@maxCount)
-                   d.Id AS DraftId, ISNULL(d.Headline, '') AS Headline, d.Subtitle,
+                   d.Id AS DraftId, d.PublishRef, ISNULL(d.Headline, '') AS Headline, d.Subtitle,
                    ISNULL(d.BodyMarkdown, '') AS BodyMarkdown, ISNULL(d.Category, '') AS Category,
                    d.Region, d.TagsJson, d.SeoTitle, d.SeoDescription,
                    d.ImageAltTextBg AS DraftAltTextBg,
@@ -211,6 +211,7 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
 
     private static ArticleToPublish ToArticle(PublishRow r) => new(
         r.DraftId,
+        r.PublishRef,
         r.Headline,
         r.Subtitle,
         r.BodyMarkdown,
@@ -223,13 +224,16 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
 
     private static PublishImage? ToImage(PublishRow r)
     {
-        if (r.ImageUrl is null || r.ImageKind == EditorUploadKind)
+        if (r.ImageUrl is null)
             return null;
-        return new PublishImage(
-            FileNameFromUrl(r.ImageUrl),
-            r.ImageUrl,
-            r.ImageAltTextBg ?? r.DraftAltTextBg ?? r.Headline,
-            r.ImageAttribution);
+        var altText = r.ImageAltTextBg ?? r.DraftAltTextBg ?? r.Headline;
+        return r.ImageKind == EditorUploadKind
+            ? new PublishImage(
+                Path.GetFileName(r.ImageUrl), SourceUrl: null, altText, r.ImageAttribution,
+                LocalPath: r.ImageUrl)
+            : new PublishImage(
+                FileNameFromUrl(r.ImageUrl), r.ImageUrl, altText, r.ImageAttribution,
+                LocalPath: null);
     }
 
     /// <summary>Derives a media file name from the image URL's last path segment;
@@ -275,6 +279,7 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
     /// <summary>Dapper row shape of <see cref="GetApprovedUnpublishedAsync"/>.</summary>
     private sealed record PublishRow(
         long DraftId,
+        Guid PublishRef,
         string Headline,
         string? Subtitle,
         string BodyMarkdown,

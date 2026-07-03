@@ -17,6 +17,13 @@ public sealed record RequestChanges(long DraftId) : ReviewCommand;
 
 public sealed record SubmitChangeInstructions(long DraftId, string Instructions) : ReviewCommand;
 
+/// <summary>🖼 pressed on the draft's photo message: select and show the next stock suggestion.</summary>
+public sealed record CycleImage(long DraftId) : ReviewCommand;
+
+/// <summary>An editor photo uploaded as a reply to the draft's review card or photo message —
+/// it becomes an 'editor-upload' image and wins selection (docs/05-integrations/images.md).</summary>
+public sealed record AttachEditorPhoto(long DraftId, string FileId) : ReviewCommand;
+
 public sealed record ShowStatus : ReviewCommand;
 
 public sealed record ShowTopics : ReviewCommand;

@@ -22,6 +22,29 @@ public interface ITelegramGateway
 
     /// <summary>Short toast answering an inline-button press (must happen within ~10 s).</summary>
     Task AnswerCallbackAsync(string callbackId, string text, CancellationToken ct);
+
+    /// <summary>Sends a photo message — <paramref name="photoUrlOrFileId"/> is a provider URL
+    /// (Telegram fetches it) or a Telegram file_id. With <paramref name="draftIdForCycleButton"/>
+    /// a single 🖼 "Друга снимка" button carrying "image:{draftId}" is attached; when both
+    /// <paramref name="index"/> and <paramref name="total"/> are set (and total &gt; 1),
+    /// "{index}/{total}" becomes the caption's last line.</summary>
+    /// <returns>The Telegram message id (stored as nw_Draft.TelegramPhotoMessageId).</returns>
+    Task<long> SendPhotoAsync(
+        long chatId, string photoUrlOrFileId, string? caption, long? draftIdForCycleButton,
+        int? index, int? total, CancellationToken ct);
+
+    /// <summary>Replaces a photo message's media + caption in place (editMessageMedia) — the 🖼
+    /// cycling and editor-upload flows edit the draft's single photo message rather than posting
+    /// new ones. Same optional cycle button as <see cref="SendPhotoAsync"/>.</summary>
+    Task EditPhotoAsync(
+        long chatId, long messageId, string photoUrlOrFileId, string? caption,
+        long? draftIdForCycleButton, CancellationToken ct);
+
+    /// <summary>Downloads a Telegram file (editor photo upload) into
+    /// <paramref name="directory"/> (created when missing) under a unique name; the extension
+    /// comes from Telegram's file path (default ".jpg").</summary>
+    /// <returns>The absolute local path — stored as the 'editor-upload' image's Url.</returns>
+    Task<string> DownloadFileToAsync(string fileId, string directory, CancellationToken ct);
 }
 
 /// <summary>
@@ -40,6 +63,39 @@ public interface IReviewRepository
     Task<DraftReviewView?> GetReviewViewAsync(long draftId, CancellationToken ct);
 
     Task SetTelegramMessageIdAsync(long draftId, long messageId, CancellationToken ct);
+
+    /// <summary>PendingReview drafts whose text card is posted (TelegramMessageId set) but whose
+    /// photo message is not (TelegramPhotoMessageId null) and that have at least one stock
+    /// suggestion. Url/Caption describe the top image (Selected DESC, Ordinal; caption =
+    /// attribution + alt text); Total counts the stock suggestions — the cycle button only makes
+    /// sense when it is ≥ 2. Drafts without stock images never appear (text-only flow).</summary>
+    Task<IReadOnlyList<(long DraftId, string Url, string? Caption, int Total)>> GetPendingPhotoDispatchAsync(
+        int max, CancellationToken ct);
+
+    Task SetTelegramPhotoMessageIdAsync(long draftId, long messageId, CancellationToken ct);
+
+    /// <summary>The draft's photo message id, when one was dispatched — null otherwise.</summary>
+    Task<long?> GetTelegramPhotoMessageIdAsync(long draftId, CancellationToken ct);
+
+    /// <summary>🖼 pressed: flips Selected to the next stock image by Ordinal (wrapping around;
+    /// an editor upload holding the selection cycles back to the first suggestion) and returns
+    /// the new selection with its 1-based index among the draft's stock images. Null when the
+    /// draft is not PendingReview or has fewer than two stock images — nothing changes.</summary>
+    Task<(long DraftId, string Url, string? Caption, int Index, int Total)?> CycleToNextImageAsync(
+        long draftId, CancellationToken ct);
+
+    /// <summary>The PendingReview draft whose review card or photo message has this Telegram
+    /// message id — how reply-bound uploads and instructions find their draft. Null when the
+    /// message belongs to no pending draft.</summary>
+    Task<long?> FindDraftByReviewMessageAsync(long messageId, CancellationToken ct);
+
+    /// <summary>Attaches an editor-uploaded photo (docs/05-integrations/images.md tier 4): one
+    /// 'editor-upload' nw_DraftImage row (Url = <paramref name="localPath"/>, Ordinal = max+1)
+    /// that takes Selected over everything else, plus the 'ImageAttached' nw_ReviewAction —
+    /// one transaction. False when the draft is not PendingReview.</summary>
+    Task<bool> AttachEditorImageAsync(
+        long draftId, string localPath, string fileId, long userId, string? userName,
+        CancellationToken ct);
 
     /// <summary>Failed editor-requested regenerations not yet reported to the chat
     /// (GenerationFailed + RegenInstructions set + TelegramMessageId null).</summary>
