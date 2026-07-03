@@ -150,3 +150,45 @@ public class DraftValidatorTests
         Assert.True(violations.Count >= 3);
     }
 }
+
+public class DraftNormalizerTests
+{
+    private static Newsroom.Core.Drafting.DraftContent Draft(string seoTitle, string seoDescription) => new(
+        Headline: "ЗАГЛАВИЕ",
+        Subtitle: null,
+        BodyMarkdown: new string('т', 600),
+        Category: "Общество",
+        Region: null,
+        Tags: ["тест"],
+        SeoTitle: seoTitle,
+        SeoDescription: seoDescription,
+        ImageSearchQueries: ["city hall"],
+        ImageAltTextBg: null,
+        FlaggedClaims: [],
+        Confidence: 0.9);
+
+    [Fact]
+    public void Normalize_truncates_overlong_seo_fields_at_word_boundary()
+    {
+        // 72-char title / 218-char description — the exact live failure from 2026-07-03
+        var title = string.Join(' ', Enumerable.Repeat("дума", 14)) + " опашка";      // 76 chars
+        var description = string.Join(' ', Enumerable.Repeat("описание", 24));        // 215 chars
+
+        var normalized = Newsroom.Core.Drafting.DraftValidator.Normalize(Draft(title, description));
+
+        Assert.True(normalized.SeoTitle.Length <= 70);
+        Assert.True(normalized.SeoDescription.Length <= 160);
+        Assert.False(normalized.SeoTitle.EndsWith(' '));
+        Assert.DoesNotContain("дум ", normalized.SeoTitle + " ");                      // no mid-word cut
+        Assert.Empty(Newsroom.Core.Drafting.DraftValidator.Validate(
+            normalized, ["Общество"], [], new Newsroom.Core.Drafting.DraftValidationOptions()));
+    }
+
+    [Fact]
+    public void Normalize_leaves_compliant_fields_untouched()
+    {
+        var draft = Draft("Кратко SEO заглавие", "Кратко SEO описание.");
+        var normalized = Newsroom.Core.Drafting.DraftValidator.Normalize(draft);
+        Assert.Equal(draft, normalized);
+    }
+}

@@ -67,6 +67,7 @@ public sealed class TelegramJob(
     /// <summary>(a) Dispatch: every PendingReview draft not yet posted gets its review card.</summary>
     private async Task DispatchPendingAsync(TelegramOptions options, CancellationToken ct)
     {
+        await ReportFailedRegenerationsAsync(options, ct);
         var pending = await reviews.GetUnsentPendingReviewsAsync(options.MaxSendPerCycle, ct);
         foreach (var view in pending)
         {
@@ -79,6 +80,29 @@ public sealed class TelegramJob(
                 view.DraftId, view.Version, messageId);
         }
     }
+
+    /// <summary>Editor-requested regenerations that failed must be reported, not swallowed —
+    /// the editor is actively waiting (found live 2026-07-03: quota failure left the editor
+    /// staring at "Правя нова версия…" forever).</summary>
+    private async Task ReportFailedRegenerationsAsync(TelegramOptions options, CancellationToken ct)
+    {
+        var failures = await reviews.GetUnreportedRegenFailuresAsync(options.MaxSendPerCycle, ct);
+        foreach (var (draftId, topicLabel, error) in failures)
+        {
+            ct.ThrowIfCancellationRequested();
+            var reason = ReviewMessageRenderer.Escape(Truncate(error, 200));
+            var label = ReviewMessageRenderer.Escape(topicLabel);
+            var messageId = await gateway.Value.SendHtmlAsync(
+                options.ReviewChatId,
+                $"⚠️ Новата версия за „{label}“ не можа да бъде създадена: {reason}",
+                withReviewButtons: false, null, ct);
+            await reviews.SetTelegramMessageIdAsync(draftId, messageId, ct);
+            logger.LogInformation("Reported failed regeneration for draft {DraftId}", draftId);
+        }
+    }
+
+    private static string Truncate(string value, int max) =>
+        value.Length <= max ? value : value[..max] + "…";
 
     /// <summary>(b) TTL sweep, at most once per minute: unactioned drafts expire
     /// (docs/02-functional-spec.md §5 — news goes stale).</summary>

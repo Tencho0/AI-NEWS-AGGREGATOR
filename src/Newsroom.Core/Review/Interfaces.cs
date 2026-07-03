@@ -41,6 +41,11 @@ public interface IReviewRepository
 
     Task SetTelegramMessageIdAsync(long draftId, long messageId, CancellationToken ct);
 
+    /// <summary>Failed editor-requested regenerations not yet reported to the chat
+    /// (GenerationFailed + RegenInstructions set + TelegramMessageId null).</summary>
+    Task<IReadOnlyList<(long DraftId, string TopicLabel, string Error)>> GetUnreportedRegenFailuresAsync(
+        int max, CancellationToken ct);
+
     /// <summary>PendingReview → Approved. False when the draft is not PendingReview.</summary>
     Task<bool> TryApproveAsync(long draftId, long userId, string? userName, CancellationToken ct);
 

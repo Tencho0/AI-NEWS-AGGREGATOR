@@ -209,8 +209,10 @@ public sealed class DraftRepository(IDbConnectionFactory db) : IDraftRepository
         using var connection = await db.OpenAsync(ct);
         using var transaction = connection.BeginTransaction();
 
-        // The SAME row flips to PendingReview; TelegramMessageId stays NULL so the review
-        // surface dispatches the new version as a fresh message.
+        // The SAME row flips to PendingReview. TelegramMessageId must be reset explicitly:
+        // a failed earlier attempt may have stored the failure-notice message id here
+        // (TelegramJob.ReportFailedRegenerationsAsync), which would make the dispatcher treat
+        // the fresh version as already posted (bit us live 2026-07-03).
         await connection.ExecuteAsync(
             """
             UPDATE dbo.nw_Draft
@@ -221,7 +223,7 @@ public sealed class DraftRepository(IDbConnectionFactory db) : IDraftRepository
                 Confidence = @confidence, ImageAltTextBg = @imageAltTextBg,
                 PromptVersion = @promptVersion, Provider = @provider, Model = @model,
                 TokensIn = @tokensIn, TokensOut = @tokensOut, Cost = @cost, Error = NULL,
-                UpdatedAtUtc = SYSUTCDATETIME()
+                TelegramMessageId = NULL, UpdatedAtUtc = SYSUTCDATETIME()
             WHERE Id = @draftId
             """,
             new

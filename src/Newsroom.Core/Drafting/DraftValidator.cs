@@ -12,6 +12,27 @@ public static class DraftValidator
     private const int MaxSeoDescriptionChars = 160;
     private const int MaxImageSearchQueries = 4;
 
+    /// <summary>
+    /// Repairs cosmetic, safely-fixable overflows before validation: SEO title/description are
+    /// truncated at a word boundary instead of failing the whole draft (models routinely
+    /// overshoot these by a few characters — observed live 2026-07-03). Substantive problems
+    /// (body, category, language) are never auto-repaired; those stay hard gates in Validate.
+    /// </summary>
+    public static DraftContent Normalize(DraftContent draft) => draft with
+    {
+        SeoTitle = TruncateAtWordBoundary(draft.SeoTitle.Trim(), MaxSeoTitleChars),
+        SeoDescription = TruncateAtWordBoundary(draft.SeoDescription.Trim(), MaxSeoDescriptionChars),
+    };
+
+    private static string TruncateAtWordBoundary(string value, int maxChars)
+    {
+        if (value.Length <= maxChars)
+            return value;
+
+        var cut = value.LastIndexOf(' ', maxChars);
+        return (cut > 0 ? value[..cut] : value[..maxChars]).TrimEnd(',', ';', ':', '-', '—', ' ');
+    }
+
     /// <summary>Returns violation messages; an empty list means the draft is valid.</summary>
     public static IReadOnlyList<string> Validate(
         DraftContent draft,

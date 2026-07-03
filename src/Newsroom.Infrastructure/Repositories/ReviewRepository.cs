@@ -70,6 +70,24 @@ public sealed class ReviewRepository(IDbConnectionFactory db) : IReviewRepositor
         return row is null ? null : ToView(row);
     }
 
+    public async Task<IReadOnlyList<(long DraftId, string TopicLabel, string Error)>> GetUnreportedRegenFailuresAsync(
+        int max, CancellationToken ct)
+    {
+        using var connection = await db.OpenAsync(ct);
+        var rows = await connection.QueryAsync<(long DraftId, string TopicLabel, string Error)>(
+            """
+            SELECT TOP (@max) d.Id, t.Label, COALESCE(d.Error, N'неизвестна грешка')
+            FROM dbo.nw_Draft d
+            JOIN dbo.nw_Topic t ON t.Id = d.TopicId
+            WHERE d.Status = @failedStatus
+              AND d.RegenInstructions IS NOT NULL
+              AND d.TelegramMessageId IS NULL
+            ORDER BY d.Id
+            """,
+            new { max, failedStatus = nameof(DraftStatus.GenerationFailed) });
+        return rows.ToList();
+    }
+
     public async Task SetTelegramMessageIdAsync(long draftId, long messageId, CancellationToken ct)
     {
         using var connection = await db.OpenAsync(ct);
