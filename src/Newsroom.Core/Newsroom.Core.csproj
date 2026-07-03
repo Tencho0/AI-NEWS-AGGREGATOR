@@ -1,9 +1,20 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Single-sourced editorial style guide (Q-2): PromptLibrary embeds the marked block from
+         docs/ at build time, so editing the doc changes every draft. If the file moves or is
+         renamed, this Include no longer resolves and the build fails loudly. -->
+    <EmbeddedResource Include="..\..\docs\editorial-style-guide.md" Link="Prompts\editorial-style-guide.md" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Newsroom.Core.Tests" />
+  </ItemGroup>
 
 </Project>

@@ -51,11 +51,16 @@ Goal: repo + docs + walking skeleton.
 
 ## Phase 3 — Draft generation & images *(~1–1.5 weeks)*
 
-- [ ] Prompt v1 (style guide baked in); drafting on Gemini Flash with structured output —
-      golden-set eval decides whether Flash quality suffices or a stage upgrade is needed (R-12)
-- [ ] Validation gates (schema, taxonomy, self-check) + `GenerationFailed` path
-- [ ] Image service: media-library search + Pexels/Pixabay + attribution + alt text
-- [ ] Golden-set eval round with the editor; prompt v2
+- [x] Prompt v1 (style guide baked in — `docs/editorial-style-guide.md` single-sourced into Core
+      as an embedded resource, PROMPT-START/END block); drafting on Gemini Flash with structured
+      output (`GeminiDraftingAi`, stages Draft + SelfCheck)
+- [x] Validation gates (`DraftValidator`: length/category/region/Cyrillic-ratio/SEO bounds) +
+      `GenerationFailed` path with `DraftAttempts` cap
+- [x] Image service: Pexels/Pixabay providers (key-optional degradation) + attribution + alt text;
+      media-library tier deferred to Phase 5 (needs Umbraco access) — **API keys not yet
+      provisioned** (owner: pixabay.com/api / pexels.com/api → user-secrets)
+- [ ] Golden-set eval round with the editor; prompt v2 — needs the real corpus (Q-1) + owner
+      review of the style guide (Q-2 draft written, 4 open points)
 - **Milestone M3:** given a hot topic, a publishable-quality Bulgarian draft + images exists in
   the DB in < 5 min; editor rubric average ≥ agreed bar.
 
@@ -105,6 +110,7 @@ low-risk categories · Playwright for JS-heavy sources · Quartz.NET if scheduli
 | 2026-07-02 | Owner decision: Gemini API (free tier) as default AI provider with easy provider switching → ADR-0005 rejected, ADR-0010 accepted; AI docs, risks and budgets reworked around free-tier quotas. |
 | 2026-07-02 | Owner decision: Gemini only at launch — free-provider research parked (research/2026-07-free-ai-providers.md), Q-9 parked. |
 | 2026-07-02 | **M0 reached.** Solution scaffolded (`Newsroom.slnx`: Core / Infrastructure / Worker / Infrastructure.Tests); migration runner + `0001_initial` (nw_Config, nw_Source, nw_Log, nw_SchemaVersion); Serilog console+file; Windows-Service-capable host with DB heartbeat; verified live: DB auto-created, migration applied once, idempotent re-run, heartbeats persisted. 12 tests green; GitHub Actions CI added. Dev note: local dev machine runs a default SQL instance (`Server=.` in appsettings.Development.json); VPS default stays `.\SQLEXPRESS`. |
+| 2026-07-03 | **Phase 3 implemented and live-verified** (migration `0005_drafts`; style guide drafted from the owner's sample articles and embedded as the prompt source; `GeminiDraftingAi` + `DraftValidator` + self-check; Pexels/Pixabay providers; `DraftJob`). Live E2E: Mediapool scrape → analyse → cluster → topic promoted Hot → **first real draft in 90 s**: ALL-CAPS two-part headline per house style, ~350-word body with attribution and concrete facts, category Политика, confidence 0.9, self-check correctly flagged the disputed claim, both source URLs recorded, status PendingReview. 0 image suggestions (Pixabay/Pexels keys pending — graceful degradation confirmed). 105 tests green. Remaining for M3: golden-set eval with the editor (Q-1/Q-2 review). |
 | 2026-07-03 | **Phase 2b implemented and live-verified** (clustering + trend scoring; migration `0004_topics`). Live chain on Mediapool: 15 articles → analysed → clustered into 14 topics with correct concise Bulgarian story labels; one cross-article join proved story grouping; 2-article topic scored 5.28 (hand-verified against the formula), correctly below the Hot threshold. Per-stage ledger: Cluster requests ~4× cheaper than Analyse. BTA persistently 429'd → failure isolation + auto-disable path exercised; source-level 429 cooldown queued for Phase 7 (scraping.md). 61 tests green. M2 remaining: backtest/tuning on a real corpus (blocked on Q-1). |
 | 2026-07-02 | **Phase 2a implemented and live-verified.** AI layer per ADR-0010 (Gemini via official `Google.GenAI` `AsIChatClient` adapter behind `IAiClient`; RPM throttle; daily request budget in `nw_CostLedger`; migration `0003_analysis`) + `AnalyseJob`. Live E2E on the BTA free feed: 20 Bulgarian articles scraped → 3 Gemini batches (`gemini-2.5-flash`, 13,241 in / 4,972 out tokens, $0 free tier) → 20 correct Bulgarian summaries with sensible categories and region scores; a transient BTA 429 on first fetch was absorbed by retry/failure-isolation and recovered on the next cycle. Gemini key provisioned via `dotnet user-secrets` (dev; never in repo — see 06-security.md; rotate when convenient). Log noise fix: `System.Net.Http.HttpClient`/`Polly` Serilog overrides. 51 tests green. Remaining for M2: clustering + trend scoring (`TrendJob`) and backtest. |
 | 2026-07-02 | **Phase 1 live-verified** on a temporary smoke source (deleted afterwards): 31 articles collected with real full-text extraction (2.5–7 k chars/article); repeated full refetches produced zero duplicates; two genuinely new mid-test items picked up incrementally. Found & fixed in the process: full text was fetched before the seen-before check → added batch URL-hash existence check so known articles cost no page fetch (politeness); consequence documented in scraping.md. 46 unit tests green. Remaining for M1: seed real sources (Q-1) and run 48 h unattended. |

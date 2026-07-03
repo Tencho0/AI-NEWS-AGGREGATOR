@@ -1,9 +1,11 @@
 using System.Net;
 using Newsroom.Core.Ai;
+using Newsroom.Core.Drafting;
 using Newsroom.Core.Scraping;
 using Newsroom.Core.Trends;
 using Newsroom.Infrastructure.Ai;
 using Newsroom.Infrastructure.Database;
+using Newsroom.Infrastructure.Images;
 using Newsroom.Infrastructure.Repositories;
 using Newsroom.Infrastructure.Scraping;
 using Newsroom.Worker.Jobs;
@@ -82,12 +84,30 @@ try
         provider.GetRequiredService<AiRateLimiter>(),
         provider.GetRequiredService<ILogger<GeminiClusteringAi>>())));
 
+    // Draft generation (docs/02-functional-spec.md §4): drafting + self-check on the same
+    // Lazy pattern, plus stock-image suggestions over a shared resilient HttpClient.
+    builder.Services.AddSingleton<IDraftRepository, DraftRepository>();
+    builder.Services.AddSingleton(provider => new Lazy<IDraftingAi>(() => new GeminiDraftingAi(
+        GeminiChatClientFactory.Create(builder.Configuration, "Draft"),
+        GeminiChatClientFactory.Create(builder.Configuration, "SelfCheck"),
+        GeminiDraftingOptions.From(builder.Configuration),
+        provider.GetRequiredService<AiRateLimiter>())));
+
+    builder.Services.AddHttpClient(ImageSuggestionService.HttpClientName,
+            client => client.Timeout = TimeSpan.FromSeconds(15))
+        .AddStandardResilienceHandler();
+    builder.Services.AddSingleton(ImagesOptions.From(builder.Configuration));
+    builder.Services.AddSingleton<IImageProvider, PixabayImageProvider>();
+    builder.Services.AddSingleton<IImageProvider, PexelsImageProvider>();
+    builder.Services.AddSingleton<ImageSuggestionService>();
+
     // Order matters: migrations must complete before any job starts.
     builder.Services.AddHostedService<MigrationStartupService>();
     builder.Services.AddHostedService<HeartbeatService>();
     builder.Services.AddHostedService<ScrapeJob>();
     builder.Services.AddHostedService<AnalyseJob>();
     builder.Services.AddHostedService<TrendJob>();
+    builder.Services.AddHostedService<DraftJob>();
 
     var host = builder.Build();
     host.Run();

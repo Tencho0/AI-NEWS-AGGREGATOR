@@ -21,3 +21,4 @@ Lightweight decisions (no ADR needed) are recorded here directly.
 | 2026-07-02 | — | **Owner: stay with Gemini API only at launch** — research shortlist parked; no secondary providers wired; provider abstraction (ADR-0010) retained as the escape hatch | Accepted |
 | 2026-07-02 | — | Gemini API key provisioned; stored via `dotnet user-secrets` (dev) / env var (VPS) — never in the repo; rotate when convenient (key transited chat) | Noted |
 | 2026-07-03 | — | Trend v1 simplifications: one topic per article (unique link, no similarity scores); no Hot demotion; trend scoring is pure code (AI only assists clustering) — formula documented in 02-functional-spec.md and `TrendScorer` | Noted |
+| 2026-07-03 | — | Q-2 style guide drafted from the owner's sample articles (`docs/editorial-style-guide.md`, PROMPT-START/END block is the prompt source, single-sourced into Core as an embedded resource); Phase 3 proceeds on the draft, owner review pending | Proposed |

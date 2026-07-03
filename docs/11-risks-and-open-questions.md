@@ -24,7 +24,7 @@
 | Id | Question | Needed by | Owner |
 |---|---|---|---|
 | Q-1 | Final source list (national + regional) + per-source ToS check | Phase 1 | Editor |
-| Q-2 | Editorial style guide text (tone, structure, length norms, attribution style) — goes verbatim into the drafting prompt | Phase 3 | Editor |
+| Q-2 | Editorial style guide — **draft written** ([editorial-style-guide.md](editorial-style-guide.md), derived from the two sample articles); awaiting owner review + answers to its 4 open points. Used verbatim in the drafting prompt from Phase 3 on | Review any time (draft unblocks Phase 3) | Editor |
 | Q-3 | AI budget policy: launch is free-tier ($0); what monthly ceiling applies **if/when** a stage upgrades to paid (triggers: R-11 quota pressure or R-12 quality gate) | Phase 3 (eval time) | Owner |
 | Q-4 | AI image generation provider (if tier-3 images are wanted) | Phase 3+ | Dev |
 | Q-5 | Is the SQL Express backup regime covering new databases automatically? | Phase 0 | Dev |
