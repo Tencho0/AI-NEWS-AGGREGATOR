@@ -72,6 +72,11 @@ public interface IPublishRepository
     Task<IReadOnlyList<FacebookPost>> GetPendingFacebookAsync(
         int maxAttempts, int maxCount, CancellationToken ct);
 
+    /// <summary>Builds a <see cref="FacebookPost"/> from any draft by id (teaser composed like
+    /// <see cref="GetPendingFacebookAsync"/>, no link since there is no site publish) — for the
+    /// manual test hook only (<c>Facebook:TestPostDraftId</c>). Null when the draft is unknown.</summary>
+    Task<FacebookPost?> GetFacebookPostForDraftAsync(long draftId, CancellationToken ct);
+
     /// <summary>Inserts the Succeeded record and recalculates the draft status in the same
     /// transaction: Published when every destination in <paramref name="requiredDestinations"/>
     /// has a Succeeded record, PartiallyPublished otherwise — the site is live while Facebook

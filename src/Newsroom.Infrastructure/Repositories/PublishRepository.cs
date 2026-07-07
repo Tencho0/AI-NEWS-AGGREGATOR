@@ -114,6 +114,24 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
             r.ArticleUrl)).ToList();
     }
 
+    public async Task<FacebookPost?> GetFacebookPostForDraftAsync(long draftId, CancellationToken ct)
+    {
+        using var connection = await db.OpenAsync(ct);
+        var row = await connection.QuerySingleOrDefaultAsync<FacebookRow>(
+            """
+            SELECT d.Id AS DraftId, ISNULL(d.Headline, '') AS Headline,
+                   d.SeoDescription, ISNULL(d.BodyMarkdown, '') AS BodyMarkdown,
+                   '' AS ArticleUrl
+            FROM dbo.nw_Draft d
+            WHERE d.Id = @draftId
+            """,
+            new { draftId });
+        return row is null
+            ? null
+            : new FacebookPost(row.DraftId, row.Headline,
+                FacebookTeaser.Compose(row.SeoDescription, row.BodyMarkdown), row.ArticleUrl);
+    }
+
     public async Task RecordSuccessAsync(
         long draftId, string destination, string externalId, string? url,
         IReadOnlyCollection<string> requiredDestinations, CancellationToken ct)

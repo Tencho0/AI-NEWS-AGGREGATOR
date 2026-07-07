@@ -32,23 +32,27 @@ public sealed class FacebookPublisher(
     public async Task<FacebookPostResult> PublishAsync(FacebookPost post, CancellationToken ct)
     {
         var message = $"{post.Headline}\n\n{post.Teaser}";
+        // The link (→ OG card) is included only when configured and present; otherwise it is a
+        // plain text post that does not carry the site URL (Facebook:IncludeLink).
+        var withLink = options.IncludeLink && !string.IsNullOrWhiteSpace(post.ArticleUrl);
         if (options.DryRun)
         {
             logger.LogInformation(
-                "Facebook dry run for draft {DraftId} — would post to page {PageId}:\n{Message}\n{Link}",
-                post.DraftId, options.PageId, message, post.ArticleUrl);
+                "Facebook dry run for draft {DraftId} — would post to page {PageId}:\n{Message}{Link}",
+                post.DraftId, options.PageId, message, withLink ? $"\n{post.ArticleUrl}" : "");
             return new FacebookPostResult(DryRunPostId, null);
         }
 
+        var form = new Dictionary<string, string>
+        {
+            ["message"] = message,
+            ["access_token"] = options.AccessToken,
+        };
+        if (withLink)
+            form["link"] = post.ArticleUrl;
+
         using var response = await http.PostAsync(
-            Endpoint($"{options.PageId}/feed"),
-            new FormUrlEncodedContent(new Dictionary<string, string>
-            {
-                ["message"] = message,
-                ["link"] = post.ArticleUrl,
-                ["access_token"] = options.AccessToken,
-            }),
-            ct);
+            Endpoint($"{options.PageId}/feed"), new FormUrlEncodedContent(form), ct);
         await ThrowIfGraphErrorAsync(response, ct);
 
         var created = await response.Content.ReadFromJsonAsync<FeedResponse>(JsonOptions, ct);

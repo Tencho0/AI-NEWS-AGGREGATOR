@@ -102,13 +102,21 @@ public sealed class TelegramJob(
         foreach (var (draftId, url, caption, total) in pendingPhotos)
         {
             ct.ThrowIfCancellationRequested();
-            var messageId = await gateway.Value.SendPhotoAsync(
-                options.ReviewChatId, url, caption,
-                draftIdForCycleButton: total >= 2 ? draftId : null, index: null, total, ct);
-            await reviews.SetTelegramPhotoMessageIdAsync(draftId, messageId, ct);
-            logger.LogInformation(
-                "🖼 Draft {DraftId}: image suggestion posted (message {MessageId}, {Total} total)",
-                draftId, messageId, total);
+            try
+            {
+                var messageId = await gateway.Value.SendPhotoAsync(
+                    options.ReviewChatId, url, caption,
+                    draftIdForCycleButton: total >= 2 ? draftId : null, index: null, total, ct);
+                await reviews.SetTelegramPhotoMessageIdAsync(draftId, messageId, ct);
+                logger.LogInformation(
+                    "🖼 Draft {DraftId}: image suggestion posted (message {MessageId}, {Total} total)",
+                    draftId, messageId, total);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex,
+                    "🖼 Draft {DraftId}: photo dispatch failed, will retry next cycle", draftId);
+            }
         }
     }
 
@@ -169,20 +177,28 @@ public sealed class TelegramJob(
             .Concat(batch.Texts.Select(t => (t.UpdateId, Update: (object)t)))
             .Concat(batch.Photos.Select(p => (p.UpdateId, Update: (object)p)))
             .OrderBy(u => u.UpdateId);
-        foreach (var (_, update) in ordered)
+        foreach (var (updateId, update) in ordered)
         {
             ct.ThrowIfCancellationRequested();
-            switch (update)
+            try
             {
-                case TgCallback callback:
-                    await HandleCallbackAsync(callback, options, allowedUsers, ct);
-                    break;
-                case TgText text:
-                    await HandleTextAsync(text, options, allowedUsers, ct);
-                    break;
-                case TgPhoto photo:
-                    await HandlePhotoAsync(photo, options, allowedUsers, ct);
-                    break;
+                switch (update)
+                {
+                    case TgCallback callback:
+                        await HandleCallbackAsync(callback, options, allowedUsers, ct);
+                        break;
+                    case TgText text:
+                        await HandleTextAsync(text, options, allowedUsers, ct);
+                        break;
+                    case TgPhoto photo:
+                        await HandlePhotoAsync(photo, options, allowedUsers, ct);
+                        break;
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex,
+                    "Failed to process Telegram update {UpdateId}, skipping", updateId);
             }
         }
 
@@ -234,13 +250,30 @@ public sealed class TelegramJob(
         if (!transitioned)
         {
             // Double-tap or stale button (docs/05 interaction rules): toast, do nothing.
-            await gateway.Value.AnswerCallbackAsync(callback.CallbackId, "Вече обработено", ct);
+            await AnswerBestEffortAsync(callback.CallbackId, "Вече обработено", ct);
             return;
         }
 
-        await gateway.Value.AnswerCallbackAsync(callback.CallbackId, toast, ct);
+        // The toast is cosmetic and fails on stale callback queries ("query is too old"); it must
+        // never abort the button-removal edit, which is what the editor actually sees.
+        await AnswerBestEffortAsync(callback.CallbackId, toast, ct);
         await EditResolvedAsync(callback.ChatId, callback.MessageId, draftId, statusLine, ct);
         logger.LogInformation("Draft {DraftId}: {Status}", draftId, statusLine);
+    }
+
+    /// <summary>answerCallbackQuery only dismisses the button's spinner + shows a toast; it expires
+    /// with the callback query (~minutes) and its failure must never block the functional
+    /// follow-up (message edit / draft transition already committed). Best-effort by design.</summary>
+    private async Task AnswerBestEffortAsync(string callbackId, string text, CancellationToken ct)
+    {
+        try
+        {
+            await gateway.Value.AnswerCallbackAsync(callbackId, text, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogDebug(ex, "answerCallbackQuery failed (likely stale query), ignoring");
+        }
     }
 
     private async Task StartChangeConversationAsync(TgCallback callback, long draftId, CancellationToken ct)

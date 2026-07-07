@@ -18,6 +18,16 @@ public sealed record FacebookOptions
     public bool DryRun { get; init; } = true;
     public int MaxAttempts { get; init; } = 3;
 
+    /// <summary>Whether the page post carries the article's live URL as the Graph <c>link</c>
+    /// field (Facebook then renders the OG card). Off makes it a plain text post — used when the
+    /// site link should not appear in the post.</summary>
+    public bool IncludeLink { get; init; } = true;
+
+    /// <summary>Manual one-shot test hook (<see cref="Publishing.FacebookTestPostService"/>): when
+    /// &gt; 0, that draft id is posted to the page once on startup via the real publisher, with no
+    /// Umbraco step. 0 (default) leaves the hook inert — production never sets it.</summary>
+    public long TestPostDraftId { get; init; }
+
     /// <summary>The Facebook leg only runs with a page and a token to post with.</summary>
     public bool IsConfigured =>
         !string.IsNullOrWhiteSpace(PageId) && !string.IsNullOrWhiteSpace(AccessToken);
@@ -29,6 +39,8 @@ public sealed record FacebookOptions
         GraphVersion = configuration.GetValue("Facebook:GraphVersion", "v23.0")!,
         DryRun = configuration.GetValue("Facebook:DryRun", true),
         MaxAttempts = configuration.GetValue("Facebook:MaxAttempts", 3),
+        IncludeLink = configuration.GetValue("Facebook:IncludeLink", true),
+        TestPostDraftId = configuration.GetValue("Facebook:TestPostDraftId", 0L),
     };
 
     private static string ResolveAccessToken(IConfiguration configuration)

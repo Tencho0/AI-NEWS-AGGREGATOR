@@ -70,6 +70,36 @@ public class FacebookPublisherTests
     }
 
     [Fact]
+    public async Task Omits_the_link_when_IncludeLink_is_off()
+    {
+        var (publisher, handler) = CreatePublisher(request => request.Path == FeedPath
+            ? Json(HttpStatusCode.OK, PostedJson)
+            : Json(HttpStatusCode.OK, PermalinkJson),
+            Options with { IncludeLink = false });
+
+        var result = await publisher.PublishAsync(Post(), CancellationToken.None);
+
+        Assert.Equal("page-1_post-9", result.PostId);
+        var feed = Assert.Single(handler.Requests, r => r.Path == FeedPath);
+        var form = ParseForm(feed.Body);
+        Assert.Equal("Заглавие на новината\n\nКратко резюме на статията.", form["message"]);
+        Assert.False(form.ContainsKey("link"));
+    }
+
+    [Fact]
+    public async Task Omits_the_link_when_the_article_url_is_empty()
+    {
+        var (publisher, handler) = CreatePublisher(request => request.Path == FeedPath
+            ? Json(HttpStatusCode.OK, PostedJson)
+            : Json(HttpStatusCode.OK, PermalinkJson));
+
+        await publisher.PublishAsync(Post() with { ArticleUrl = "" }, CancellationToken.None);
+
+        var feed = Assert.Single(handler.Requests, r => r.Path == FeedPath);
+        Assert.False(ParseForm(feed.Body).ContainsKey("link"));
+    }
+
+    [Fact]
     public async Task Fetches_the_permalink_after_posting()
     {
         var (publisher, handler) = CreatePublisher(request => request.Path == FeedPath

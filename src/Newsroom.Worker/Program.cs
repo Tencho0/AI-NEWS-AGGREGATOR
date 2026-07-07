@@ -146,6 +146,7 @@ try
     builder.Services.AddHostedService<DraftJob>();
     builder.Services.AddHostedService<TelegramJob>();
     builder.Services.AddHostedService<PublishJob>();
+    builder.Services.AddHostedService<FacebookTestPostService>();
     builder.Services.AddHostedService<WatchdogJob>();
     builder.Services.AddHostedService<DailyDigestJob>();
     builder.Services.AddHostedService<RetentionJob>();

@@ -116,11 +116,11 @@ public sealed class DraftJob(
             {
                 await DraftTopicAsync(topicId, label, options, maxAttempts, ct);
             }
-            catch (Exception ex) when (IsQuotaExhausted(ex))
+            catch (Exception ex) when (AiTransientErrors.IsTransient(ex))
             {
-                // Provider quota, not this draft's fault: no attempt burned, retry next cycle
-                // once the quota window resets (risk R-11).
-                logger.LogWarning("AI quota exhausted while drafting topic {TopicId}; will retry later", topicId);
+                // Provider quota or transient overload, not this draft's fault: no attempt burned,
+                // retry next cycle once the quota window resets / capacity frees up (risk R-11).
+                logger.LogWarning("AI temporarily unavailable while drafting topic {TopicId}; will retry later", topicId);
                 return;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -156,10 +156,11 @@ public sealed class DraftJob(
             {
                 await RegenerateDraftAsync(regeneration, options, ct);
             }
-            catch (Exception ex) when (IsQuotaExhausted(ex))
+            catch (Exception ex) when (AiTransientErrors.IsTransient(ex))
             {
-                // Row stays Generating with its instructions; retried automatically next cycle.
-                logger.LogWarning("AI quota exhausted while regenerating draft {DraftId}; will retry later",
+                // Row stays Generating with its instructions; retried automatically next cycle
+                // once the quota window resets / capacity frees up.
+                logger.LogWarning("AI temporarily unavailable while regenerating draft {DraftId}; will retry later",
                     regeneration.DraftId);
                 return;
             }
@@ -171,16 +172,6 @@ public sealed class DraftJob(
             }
         }
     }
-
-    /// <summary>
-    /// Provider quota/rate exhaustion (Gemini free tier resets daily). String-matched because
-    /// the Google SDK surfaces it as a generic exception; matches "quota", HTTP 429 and
-    /// RESOURCE_EXHAUSTED wordings.
-    /// </summary>
-    internal static bool IsQuotaExhausted(Exception ex) =>
-        ex.Message.Contains("quota", StringComparison.OrdinalIgnoreCase)
-        || ex.Message.Contains("RESOURCE_EXHAUSTED", StringComparison.Ordinal)
-        || ex.Message.Contains("429", StringComparison.Ordinal);
 
     private async Task DraftTopicAsync(
         long topicId, string label, GeminiDraftingOptions options, int maxAttempts, CancellationToken ct)

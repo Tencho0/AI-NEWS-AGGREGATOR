@@ -102,6 +102,13 @@ public sealed class AnalyseJob(
                 "Analysed {Count} article(s) with {Model} ({TokensIn} in / {TokensOut} out tokens)",
                 result.Results.Count, result.Usage.Model, result.Usage.TokensIn, result.Usage.TokensOut);
         }
+        catch (Exception ex) when (AiTransientErrors.IsTransient(ex))
+        {
+            // Provider quota or transient overload, not these articles' fault: no attempt burned,
+            // retry next cycle once the quota window resets / capacity frees up (risk R-11).
+            logger.LogWarning("AI temporarily unavailable while analysing {Count} article(s); will retry later",
+                batchIds.Count);
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex, "Analyse cycle failed for {Count} article(s)", batchIds.Count);
