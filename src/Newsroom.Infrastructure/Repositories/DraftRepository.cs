@@ -213,6 +213,9 @@ public sealed class DraftRepository(IDbConnectionFactory db) : IDraftRepository
         // a failed earlier attempt may have stored the failure-notice message id here
         // (TelegramJob.ReportFailedRegenerationsAsync), which would make the dispatcher treat
         // the fresh version as already posted (bit us live 2026-07-03).
+        // PostedAtUtc is reset to NULL for the same reason: the review-TTL clock must restart from
+        // when the *new* version is posted, not from the original change-request time — otherwise a
+        // slow regeneration (free-tier quota stall) shrinks or zeroes the editor's review window.
         await connection.ExecuteAsync(
             """
             UPDATE dbo.nw_Draft
@@ -223,7 +226,7 @@ public sealed class DraftRepository(IDbConnectionFactory db) : IDraftRepository
                 Confidence = @confidence, ImageAltTextBg = @imageAltTextBg,
                 PromptVersion = @promptVersion, Provider = @provider, Model = @model,
                 TokensIn = @tokensIn, TokensOut = @tokensOut, Cost = @cost, Error = NULL,
-                TelegramMessageId = NULL, UpdatedAtUtc = SYSUTCDATETIME()
+                TelegramMessageId = NULL, PostedAtUtc = NULL, UpdatedAtUtc = SYSUTCDATETIME()
             WHERE Id = @draftId
             """,
             new

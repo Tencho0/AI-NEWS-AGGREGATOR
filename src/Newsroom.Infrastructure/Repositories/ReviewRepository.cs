@@ -95,13 +95,19 @@ public sealed class ReviewRepository(IDbConnectionFactory db) : IReviewRepositor
     public async Task SetTelegramMessageIdAsync(long draftId, long messageId, CancellationToken ct)
     {
         using var connection = await db.OpenAsync(ct);
+        // PostedAtUtc anchors the review-TTL sweep (ExpireStaleAsync) to when the card was actually
+        // shown to the editor. Stamp it only for a genuine review post (Status = PendingReview):
+        // this method is reused to record the message id of a regeneration-failure notice on a
+        // GenerationFailed draft, which must not start a review clock.
         await connection.ExecuteAsync(
             """
             UPDATE dbo.nw_Draft
-            SET TelegramMessageId = @messageId, UpdatedAtUtc = SYSUTCDATETIME()
+            SET TelegramMessageId = @messageId,
+                PostedAtUtc = CASE WHEN Status = @pendingStatus THEN SYSUTCDATETIME() ELSE PostedAtUtc END,
+                UpdatedAtUtc = SYSUTCDATETIME()
             WHERE Id = @draftId
             """,
-            new { draftId, messageId });
+            new { draftId, messageId, pendingStatus = nameof(DraftStatus.PendingReview) });
     }
 
     public async Task<IReadOnlyList<(long DraftId, string Url, string? Caption, int Total)>> GetPendingPhotoDispatchAsync(
@@ -332,12 +338,16 @@ public sealed class ReviewRepository(IDbConnectionFactory db) : IReviewRepositor
         DateTime cutoffUtc, CancellationToken ct)
     {
         using var connection = await db.OpenAsync(ct);
+        // Expire on PostedAtUtc (when the card was shown), not CreatedAtUtc (when the row was
+        // made) — see 0010_review_posted_at.sql. A PendingReview draft not yet dispatched has
+        // PostedAtUtc NULL; the `< @cutoffUtc` comparison is UNKNOWN for NULL, so it is correctly
+        // excluded and never expires before the editor has actually seen it.
         var rows = await connection.QueryAsync<(long DraftId, long? MessageId)>(
             """
             UPDATE dbo.nw_Draft
             SET Status = @expiredStatus, UpdatedAtUtc = SYSUTCDATETIME()
             OUTPUT INSERTED.Id AS DraftId, INSERTED.TelegramMessageId AS MessageId
-            WHERE Status = @pendingStatus AND CreatedAtUtc < @cutoffUtc
+            WHERE Status = @pendingStatus AND PostedAtUtc < @cutoffUtc
             """,
             new
             {
