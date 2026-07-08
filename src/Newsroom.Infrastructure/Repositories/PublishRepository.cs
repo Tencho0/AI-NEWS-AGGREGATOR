@@ -118,17 +118,24 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
         int maxAttempts, int maxCount, CancellationToken ct)
     {
         using var connection = await db.OpenAsync(ct);
-        // Facebook-only mode: no Umbraco join and no site URL — the post is plain text. Selection
-        // mirrors GetPendingFacebookAsync's Facebook gate (no Succeeded 'facebook' record, failed
-        // attempts under the cap) but keys off Approved drafts directly instead of the
-        // site-published PartiallyPublished ones.
-        var rows = await connection.QueryAsync<FacebookRow>(
+        // Facebook-only mode: no Umbraco join and no site URL. Selection mirrors
+        // GetPendingFacebookAsync's Facebook gate (no Succeeded 'facebook' record, failed attempts
+        // under the cap) but keys off Approved drafts directly. The draft's chosen image (Selected
+        // first, else lowest Ordinal — the same pick as the Umbraco leg) rides along so the page
+        // post carries the picture, not just text.
+        var rows = await connection.QueryAsync<FacebookApprovedRow>(
             """
             SELECT TOP (@maxCount)
                    d.Id AS DraftId, ISNULL(d.Headline, '') AS Headline,
-                   d.SeoDescription, ISNULL(d.BodyMarkdown, '') AS BodyMarkdown,
-                   '' AS ArticleUrl
+                   ISNULL(d.BodyMarkdown, '') AS BodyMarkdown,
+                   img.SourceKind AS ImageKind, img.Url AS ImageUrl
             FROM dbo.nw_Draft d
+            OUTER APPLY (
+                SELECT TOP 1 di.SourceKind, di.Url
+                FROM dbo.nw_DraftImage di
+                WHERE di.DraftId = d.Id
+                ORDER BY di.Selected DESC, di.Ordinal
+            ) img
             WHERE d.Status = @approvedStatus
               AND NOT EXISTS (
                   SELECT 1 FROM dbo.nw_PublishRecord p
@@ -153,7 +160,19 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
         // whole body goes in — not the short teaser the link-post path uses.
         return rows.Select(r => new FacebookPost(
             r.DraftId, r.Headline, FacebookTeaser.ComposeFullBody(r.BodyMarkdown),
-            r.ArticleUrl)).ToList();
+            ArticleUrl: "", ToFacebookImage(r.ImageKind, r.ImageUrl))).ToList();
+    }
+
+    /// <summary>The chosen draft image as a Facebook photo source: editor uploads live on the
+    /// worker's disk (sent as multipart bytes), everything else is a hosted URL Facebook fetches
+    /// server-side. Null when the draft has no image — the publisher then posts text only.</summary>
+    private static FacebookImage? ToFacebookImage(string? kind, string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return null;
+        return kind == EditorUploadKind
+            ? new FacebookImage(Url: null, LocalPath: url, FileName: Path.GetFileName(url))
+            : new FacebookImage(Url: url, LocalPath: null, FileName: FileNameFromUrl(url));
     }
 
     public async Task<FacebookPost?> GetFacebookPostForDraftAsync(long draftId, CancellationToken ct)
@@ -335,6 +354,15 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
         string? SeoDescription,
         string BodyMarkdown,
         string ArticleUrl);
+
+    /// <summary>Dapper row shape of <see cref="GetApprovedForFacebookAsync"/> — adds the chosen
+    /// image (source kind + URL/local path) to the Facebook-only post.</summary>
+    private sealed record FacebookApprovedRow(
+        long DraftId,
+        string Headline,
+        string BodyMarkdown,
+        string? ImageKind,
+        string? ImageUrl);
 
     /// <summary>Dapper row shape of <see cref="GetApprovedUnpublishedAsync"/>.</summary>
     private sealed record PublishRow(

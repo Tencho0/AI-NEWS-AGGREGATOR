@@ -11,9 +11,11 @@ namespace Newsroom.Infrastructure.Tests.Publishing;
 public class FacebookPublisherTests
 {
     private const string FeedPath = "/v23.0/page-1/feed";
+    private const string PhotoPath = "/v23.0/page-1/photos";
     private const string PostPath = "/v23.0/page-1_post-9";
 
     private const string PostedJson = """{"id":"page-1_post-9"}""";
+    private const string PhotoPostedJson = """{"id":"photo-1","post_id":"page-1_post-9"}""";
     private const string PermalinkJson =
         """{"permalink_url":"https://www.facebook.com/page-1/posts/post-9","id":"page-1_post-9"}""";
 
@@ -97,6 +99,63 @@ public class FacebookPublisherTests
 
         var feed = Assert.Single(handler.Requests, r => r.Path == FeedPath);
         Assert.False(ParseForm(feed.Body).ContainsKey("link"));
+    }
+
+    [Fact]
+    public async Task Posts_a_photo_with_the_image_url_and_caption_when_the_draft_has_a_url_image()
+    {
+        var (publisher, handler) = CreatePublisher(request => request.Path == PhotoPath
+            ? Json(HttpStatusCode.OK, PhotoPostedJson)
+            : Json(HttpStatusCode.OK, PermalinkJson));
+
+        var post = Post() with
+        {
+            ArticleUrl = "",
+            Image = new FacebookImage("https://cdn.pixabay.com/photo/x.jpg", LocalPath: null, "x.jpg"),
+        };
+
+        var result = await publisher.PublishAsync(post, CancellationToken.None);
+
+        Assert.Equal("page-1_post-9", result.PostId); // the feed post_id, not the photo id
+        Assert.DoesNotContain(handler.Requests, r => r.Path == FeedPath); // a photo post, not /feed
+        var photo = Assert.Single(handler.Requests, r => r.Path == PhotoPath);
+        var form = ParseForm(photo.Body);
+        Assert.Equal("https://cdn.pixabay.com/photo/x.jpg", form["url"]);
+        Assert.Equal("Заглавие на новината\n\nКратко резюме на статията.", form["message"]);
+        Assert.Equal("tok-fb", form["access_token"]);
+    }
+
+    [Fact]
+    public async Task Posts_to_feed_not_photos_when_the_draft_has_no_image()
+    {
+        var (publisher, handler) = CreatePublisher(request => request.Path == FeedPath
+            ? Json(HttpStatusCode.OK, PostedJson)
+            : Json(HttpStatusCode.OK, PermalinkJson));
+
+        await publisher.PublishAsync(Post(), CancellationToken.None); // Post() carries no image
+
+        Assert.Contains(handler.Requests, r => r.Path == FeedPath);
+        Assert.DoesNotContain(handler.Requests, r => r.Path == PhotoPath);
+    }
+
+    [Fact]
+    public async Task Falls_back_to_a_text_post_when_the_local_image_file_is_missing()
+    {
+        var (publisher, handler) = CreatePublisher(request => request.Path == FeedPath
+            ? Json(HttpStatusCode.OK, PostedJson)
+            : Json(HttpStatusCode.OK, PermalinkJson));
+
+        var post = Post() with
+        {
+            ArticleUrl = "",
+            Image = new FacebookImage(Url: null, "Z:/missing/photo.jpg", "photo.jpg"),
+        };
+
+        var result = await publisher.PublishAsync(post, CancellationToken.None);
+
+        Assert.Equal("page-1_post-9", result.PostId);
+        Assert.Contains(handler.Requests, r => r.Path == FeedPath); // fell back to text
+        Assert.DoesNotContain(handler.Requests, r => r.Path == PhotoPath);
     }
 
     [Fact]
