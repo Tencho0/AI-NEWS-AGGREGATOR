@@ -102,12 +102,38 @@ public class FacebookTeaserTests
     }
 
     [Fact]
-    public void ComposeFullBody_collapses_blank_runs_and_single_newlines()
+    public void ComposeFullBody_preserves_single_line_breaks_and_collapses_blank_runs()
     {
-        // 3+ newlines between paragraphs → one break; a single newline inside a paragraph → space.
-        var full = FacebookTeaser.ComposeFullBody("Ред едно\nпродължение.\n\n\n\nВтори абзац.");
+        // A single newline is a real line break (kept); 3+ newlines collapse to one blank line.
+        var full = FacebookTeaser.ComposeFullBody("Ред едно\nРед две.\n\n\n\nВтори абзац.");
 
-        Assert.Equal("Ред едно продължение.\n\nВтори абзац.", full);
+        Assert.Equal("Ред едно\nРед две.\n\nВтори абзац.", full);
+    }
+
+    [Fact]
+    public void ComposeFullBody_keeps_markdown_list_items_on_their_own_rows()
+    {
+        // The reported bug: a bullet list (single-newline separated) was flattened into one line.
+        var body =
+            "📊 **Времето в числа:**\n"
+            + "* 🌡️ **Благоевград днес:** от 14°C до 30°C.\n"
+            + "* 💨 **По долината на Струма:** силен вятър.\n"
+            + "* 🔥 **Петрич:** горещини до 37-38°C.";
+
+        var full = FacebookTeaser.ComposeFullBody(body);
+
+        Assert.Equal(
+            "📊 Времето в числа:\n"
+            + "🌡️ Благоевград днес: от 14°C до 30°C.\n"
+            + "💨 По долината на Струма: силен вятър.\n"
+            + "🔥 Петрич: горещини до 37-38°C.",
+            full);
+    }
+
+    [Fact]
+    public void ComposeFullBody_does_not_lead_or_trail_with_blank_lines()
+    {
+        Assert.Equal("Само абзац.", FacebookTeaser.ComposeFullBody("\n\nСамо абзац.\n\n"));
     }
 
     [Theory]

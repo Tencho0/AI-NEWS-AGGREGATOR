@@ -23,20 +23,36 @@ public static class FacebookTeaser
 
     /// <summary>The whole article body as plain text for a Facebook-only post (Publishing:
     /// FacebookOnly) — there is no website link to carry the full read, so the post *is* the
-    /// article. Markdown markers are stripped like <see cref="StripMarkdown"/>, but paragraph
-    /// breaks (blank lines) are preserved so the post reads as prose rather than one collapsed
-    /// block. Not truncated: Facebook allows ~63k characters, far beyond any draft. Pure.</summary>
+    /// article. Markdown markers are stripped like <see cref="StripMarkdown"/> (Facebook renders
+    /// no markdown, so a literal <c>**</c> or <c>*</c> would just be noise), but line breaks are
+    /// preserved: every non-blank source line stays its own row and runs of blank lines collapse
+    /// to a single blank line. That keeps bullet lists and deliberate breaks looking as authored
+    /// instead of flattening into one block. Leading/trailing blanks are dropped. Not truncated:
+    /// Facebook allows ~63k characters. Pure. (The teaser path, <see cref="Compose"/>, instead
+    /// collapses everything to one line.)</summary>
     public static string ComposeFullBody(string? bodyMarkdown)
     {
         if (string.IsNullOrWhiteSpace(bodyMarkdown))
             return "";
 
-        var paragraphs = bodyMarkdown
-            .Replace("\r\n", "\n").Replace('\r', '\n')
-            .Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
-            .Select(StripMarkdown)
-            .Where(paragraph => paragraph.Length > 0);
-        return string.Join("\n\n", paragraphs);
+        var builder = new StringBuilder();
+        var pendingBlankLine = false;
+        foreach (var rawLine in bodyMarkdown.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'))
+        {
+            // Per line: reuse the teaser's marker handling (drops * and #, resolves [text](url),
+            // collapses runs of spaces). An empty result is a blank line separating paragraphs.
+            var line = StripMarkdown(rawLine);
+            if (line.Length == 0)
+            {
+                pendingBlankLine = builder.Length > 0; // never lead with blank lines
+                continue;
+            }
+            if (builder.Length > 0)
+                builder.Append(pendingBlankLine ? "\n\n" : "\n");
+            pendingBlankLine = false;
+            builder.Append(line);
+        }
+        return builder.ToString();
     }
 
     /// <summary>Minimal markdown-to-plain-text, enough for a teaser: [text](url) links keep
