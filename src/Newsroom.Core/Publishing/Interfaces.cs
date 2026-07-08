@@ -77,6 +77,15 @@ public interface IPublishRepository
     /// manual test hook only (<c>Facebook:TestPostDraftId</c>). Null when the draft is unknown.</summary>
     Task<FacebookPost?> GetFacebookPostForDraftAsync(long draftId, CancellationToken ct);
 
+    /// <summary>Facebook-only mode (<c>Publishing:FacebookOnly</c>, decision-log 2026-07-08):
+    /// Approved drafts posted straight to the page with no site publish. Selects Approved drafts
+    /// with no Succeeded 'facebook' record and summed failed 'facebook' attempts below
+    /// <paramref name="maxAttempts"/> — shaped for the Graph API with the teaser composed and an
+    /// empty link (a plain-text post). This is the site-independent sibling of
+    /// <see cref="GetPendingFacebookAsync"/>; it never touches the 'umbraco' destination.</summary>
+    Task<IReadOnlyList<FacebookPost>> GetApprovedForFacebookAsync(
+        int maxAttempts, int maxCount, CancellationToken ct);
+
     /// <summary>Inserts the Succeeded record and recalculates the draft status in the same
     /// transaction: Published when every destination in <paramref name="requiredDestinations"/>
     /// has a Succeeded record, PartiallyPublished otherwise — the site is live while Facebook

@@ -121,6 +121,7 @@ try
     // page/token to a site-only one (Facebook:DryRun additionally defaults ON).
     builder.Services.AddSingleton(UmbracoOptions.From(builder.Configuration));
     builder.Services.AddSingleton(FacebookOptions.From(builder.Configuration));
+    builder.Services.AddSingleton(PublishingOptions.From(builder.Configuration));
     builder.Services.AddSingleton<IPublishRepository, PublishRepository>();
     builder.Services.AddHttpClient<IUmbracoPublisher, UmbracoPublisher>(
             client => client.Timeout = TimeSpan.FromSeconds(30))

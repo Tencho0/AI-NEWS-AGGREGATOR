@@ -32,6 +32,7 @@ public sealed class PublishJob(
     Lazy<ITelegramGateway> gateway,
     UmbracoOptions options,
     FacebookOptions facebookOptions,
+    PublishingOptions publishing,
     IJobHeartbeat heartbeat,
     IConfiguration configuration,
     ILogger<PublishJob> logger) : BackgroundService
@@ -39,18 +40,38 @@ public sealed class PublishJob(
     private const int MaxPerCycle = 3;
     private static readonly TimeSpan TokenCheckInterval = TimeSpan.FromDays(1);
 
-    /// <summary>What "fully Published" means for this process: Facebook joins the required
-    /// set only when configured, so a site-only setup keeps today's Approved → Published flow.</summary>
-    private readonly string[] requiredDestinations = facebookOptions.IsConfigured
-        ? [PublishDestinations.Umbraco, PublishDestinations.Facebook]
-        : [PublishDestinations.Umbraco];
+    /// <summary>What "fully Published" means for this process: in Facebook-only mode the page
+    /// post is the only required destination (Approved → Published, no site); otherwise Facebook
+    /// joins the required set only when configured, so a site-only setup keeps today's flow.</summary>
+    private readonly string[] requiredDestinations = publishing.FacebookOnly
+        ? [PublishDestinations.Facebook]
+        : facebookOptions.IsConfigured
+            ? [PublishDestinations.Umbraco, PublishDestinations.Facebook]
+            : [PublishDestinations.Umbraco];
 
     private DateTime lastTokenCheckUtc; // MinValue → the first cycle checks immediately
     private DateTime lastTokenAlertUtc;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!options.IsConfigured)
+        // Facebook-only mode (Publishing:FacebookOnly, decision-log 2026-07-08): the website leg
+        // is skipped while the site is being polished, so Umbraco config is not required — but
+        // Facebook is, since it is now the only destination. Flip the flag back to false (and
+        // configure Umbraco) to restore the full site → Facebook pipeline, no code change.
+        if (publishing.FacebookOnly)
+        {
+            if (!facebookOptions.IsConfigured)
+            {
+                logger.LogWarning(
+                    "Publishing disabled: FACEBOOK-ONLY mode is on but Facebook is not configured "
+                        + "(Facebook:PageId / AccessToken)");
+                return;
+            }
+            logger.LogWarning(
+                "Publishing in FACEBOOK-ONLY mode (Publishing:FacebookOnly) — the website (Umbraco) "
+                    + "leg is skipped; Approved drafts post straight to the Facebook page");
+        }
+        else if (!options.IsConfigured)
         {
             // Once per process by construction: ExecuteAsync runs once and the job ends here.
             logger.LogWarning("Publishing disabled: not configured (Umbraco:BaseUrl / ClientSecret)");
@@ -82,7 +103,8 @@ public sealed class PublishJob(
 
     private async Task RunCycleAsync(CancellationToken ct)
     {
-        await RunUmbracoLegAsync(ct);
+        if (!publishing.FacebookOnly)
+            await RunUmbracoLegAsync(ct);
         if (facebookOptions.IsConfigured)
         {
             await RunFacebookLegAsync(ct);
@@ -173,16 +195,20 @@ public sealed class PublishJob(
 
     // ---- Facebook leg ------------------------------------------------------------------
 
-    /// <summary>Posts the link post for drafts whose site publish succeeded (they sit in
-    /// PartiallyPublished with Facebook budget left — the repository query owns that gate),
-    /// with the same per-draft error isolation as the Umbraco leg.</summary>
+    /// <summary>Posts the page post for the drafts the repository hands us, with per-draft error
+    /// isolation. In the normal pipeline these are drafts whose site publish succeeded (sitting in
+    /// PartiallyPublished with Facebook budget left); in Facebook-only mode they are Approved
+    /// drafts with no site step at all. Either way the repository query owns the gate.</summary>
     private async Task RunFacebookLegAsync(CancellationToken ct)
     {
         IReadOnlyList<FacebookPost> posts;
         try
         {
-            posts = await publishes.GetPendingFacebookAsync(
-                facebookOptions.MaxAttempts, MaxPerCycle, ct);
+            posts = publishing.FacebookOnly
+                ? await publishes.GetApprovedForFacebookAsync(
+                    facebookOptions.MaxAttempts, MaxPerCycle, ct)
+                : await publishes.GetPendingFacebookAsync(
+                    facebookOptions.MaxAttempts, MaxPerCycle, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

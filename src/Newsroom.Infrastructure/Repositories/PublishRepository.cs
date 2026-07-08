@@ -114,6 +114,46 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
             r.ArticleUrl)).ToList();
     }
 
+    public async Task<IReadOnlyList<FacebookPost>> GetApprovedForFacebookAsync(
+        int maxAttempts, int maxCount, CancellationToken ct)
+    {
+        using var connection = await db.OpenAsync(ct);
+        // Facebook-only mode: no Umbraco join and no site URL — the post is plain text. Selection
+        // mirrors GetPendingFacebookAsync's Facebook gate (no Succeeded 'facebook' record, failed
+        // attempts under the cap) but keys off Approved drafts directly instead of the
+        // site-published PartiallyPublished ones.
+        var rows = await connection.QueryAsync<FacebookRow>(
+            """
+            SELECT TOP (@maxCount)
+                   d.Id AS DraftId, ISNULL(d.Headline, '') AS Headline,
+                   d.SeoDescription, ISNULL(d.BodyMarkdown, '') AS BodyMarkdown,
+                   '' AS ArticleUrl
+            FROM dbo.nw_Draft d
+            WHERE d.Status = @approvedStatus
+              AND NOT EXISTS (
+                  SELECT 1 FROM dbo.nw_PublishRecord p
+                  WHERE p.DraftId = d.Id AND p.Destination = @facebook
+                    AND p.Status = @succeededStatus)
+              AND ISNULL((
+                  SELECT SUM(p.Attempts) FROM dbo.nw_PublishRecord p
+                  WHERE p.DraftId = d.Id AND p.Destination = @facebook
+                    AND p.Status = @failedStatus), 0) < @maxAttempts
+            ORDER BY d.Id
+            """,
+            new
+            {
+                maxCount,
+                maxAttempts,
+                approvedStatus = nameof(DraftStatus.Approved),
+                facebook = PublishDestinations.Facebook,
+                succeededStatus = SucceededStatus,
+                failedStatus = FailedStatus,
+            });
+        return rows.Select(r => new FacebookPost(
+            r.DraftId, r.Headline, FacebookTeaser.Compose(r.SeoDescription, r.BodyMarkdown),
+            r.ArticleUrl)).ToList();
+    }
+
     public async Task<FacebookPost?> GetFacebookPostForDraftAsync(long draftId, CancellationToken ct)
     {
         using var connection = await db.OpenAsync(ct);
