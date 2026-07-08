@@ -72,4 +72,50 @@ public class FacebookTeaserTests
 
         Assert.Equal(body, FacebookTeaser.Compose(null, body));
     }
+
+    [Fact]
+    public void ComposeFullBody_keeps_the_whole_body_untruncated()
+    {
+        var body = string.Concat(Enumerable.Repeat("Общинската администрация съобщи за мерки. ", 20));
+
+        var full = FacebookTeaser.ComposeFullBody(body);
+
+        Assert.True(full.Length > FacebookTeaser.MaxBodyChars); // not cut to the teaser budget
+        Assert.DoesNotContain("…", full);
+    }
+
+    [Fact]
+    public void ComposeFullBody_preserves_paragraph_breaks()
+    {
+        var full = FacebookTeaser.ComposeFullBody("Първи абзац.\n\nВтори абзац.\n\nТрети абзац.");
+
+        Assert.Equal("Първи абзац.\n\nВтори абзац.\n\nТрети абзац.", full);
+    }
+
+    [Fact]
+    public void ComposeFullBody_strips_markdown_but_keeps_the_paragraph_structure()
+    {
+        var full = FacebookTeaser.ComposeFullBody(
+            "## Заглавие\n\n**Общината** обяви *нови* мерки — виж [сайта](https://predel.news/x).");
+
+        Assert.Equal("Заглавие\n\nОбщината обяви нови мерки — виж сайта.", full);
+    }
+
+    [Fact]
+    public void ComposeFullBody_collapses_blank_runs_and_single_newlines()
+    {
+        // 3+ newlines between paragraphs → one break; a single newline inside a paragraph → space.
+        var full = FacebookTeaser.ComposeFullBody("Ред едно\nпродължение.\n\n\n\nВтори абзац.");
+
+        Assert.Equal("Ред едно продължение.\n\nВтори абзац.", full);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   \n\n  ")]
+    public void ComposeFullBody_of_empty_input_is_empty(string? body)
+    {
+        Assert.Equal("", FacebookTeaser.ComposeFullBody(body));
+    }
 }

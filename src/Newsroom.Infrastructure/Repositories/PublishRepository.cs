@@ -149,8 +149,10 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
                 succeededStatus = SucceededStatus,
                 failedStatus = FailedStatus,
             });
+        // Facebook-only: the post IS the article (no site link to carry the full read), so the
+        // whole body goes in — not the short teaser the link-post path uses.
         return rows.Select(r => new FacebookPost(
-            r.DraftId, r.Headline, FacebookTeaser.Compose(r.SeoDescription, r.BodyMarkdown),
+            r.DraftId, r.Headline, FacebookTeaser.ComposeFullBody(r.BodyMarkdown),
             r.ArticleUrl)).ToList();
     }
 

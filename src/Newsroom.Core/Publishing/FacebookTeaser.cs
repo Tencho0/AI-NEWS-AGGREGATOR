@@ -21,6 +21,24 @@ public static class FacebookTeaser
         return TruncateOnWordBoundary(StripMarkdown(bodyMarkdown), MaxBodyChars);
     }
 
+    /// <summary>The whole article body as plain text for a Facebook-only post (Publishing:
+    /// FacebookOnly) — there is no website link to carry the full read, so the post *is* the
+    /// article. Markdown markers are stripped like <see cref="StripMarkdown"/>, but paragraph
+    /// breaks (blank lines) are preserved so the post reads as prose rather than one collapsed
+    /// block. Not truncated: Facebook allows ~63k characters, far beyond any draft. Pure.</summary>
+    public static string ComposeFullBody(string? bodyMarkdown)
+    {
+        if (string.IsNullOrWhiteSpace(bodyMarkdown))
+            return "";
+
+        var paragraphs = bodyMarkdown
+            .Replace("\r\n", "\n").Replace('\r', '\n')
+            .Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
+            .Select(StripMarkdown)
+            .Where(paragraph => paragraph.Length > 0);
+        return string.Join("\n\n", paragraphs);
+    }
+
     /// <summary>Minimal markdown-to-plain-text, enough for a teaser: [text](url) links keep
     /// their text, emphasis (**, *) and heading (#) markers are dropped, and all whitespace
     /// (including newlines) collapses to single spaces.</summary>
