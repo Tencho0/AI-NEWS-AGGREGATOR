@@ -38,16 +38,25 @@ dotnet run --project src\Newsroom.Worker -c Debug
 
 ## Option B — Detached start (keeps running after you close the terminal) ← use this
 
-Build once, then launch the built .exe as its own process:
+Build once, then launch the built .exe as its own process. `-WindowStyle Hidden` means **no
+window at all**, so there is nothing to accidentally close — you can shut every terminal and it
+keeps running:
 
 ```powershell
 dotnet build src\Newsroom.Worker\Newsroom.Worker.csproj -c Debug   # rebuild after any code change
 $env:DOTNET_ENVIRONMENT = 'Development'
 $dir = Resolve-Path "src\Newsroom.Worker\bin\Debug\net10.0"
-Start-Process -FilePath "$dir\Newsroom.Worker.exe" -WorkingDirectory $dir
+Start-Process -FilePath "$dir\Newsroom.Worker.exe" -WorkingDirectory $dir -WindowStyle Hidden
 ```
 
-It now runs independently. Logs go to `src\Newsroom.Worker\bin\Debug\net10.0\logs\newsroom-<date>.log`.
+It now runs independently. Logs go to `src\Newsroom.Worker\bin\Debug\net10.0\logs\newsroom-<date>.log`
+(there is no live console, so watch the log file — see section 3).
+
+> **Which window can I close?** If you drop `-WindowStyle Hidden`, the worker opens its **own**
+> console window showing live logs — closing *that* window (or Ctrl+C in it) **stops** the worker.
+> The PowerShell window you *typed the launch command into* is separate; closing it is always safe.
+> With `-WindowStyle Hidden` there is no worker window, so this whole question goes away — stop it
+> via section 4 instead.
 
 ## 3. Check it is running
 
