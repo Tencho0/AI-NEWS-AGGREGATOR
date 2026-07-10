@@ -1,6 +1,6 @@
 # Integration — AI Content Generation (provider-agnostic; Gemini default)
 
-**Status:** Draft · **Last updated:** 2026-07-02 · **ADR:** 0010 (supersedes 0005)
+**Status:** Draft · **Last updated:** 2026-07-10 · **ADR:** 0010 (supersedes 0005)
 
 ## Architecture: two layers, providers are plugins
 
@@ -34,10 +34,53 @@ Facts as of 2026-07 (indicative — the authoritative live numbers are in the
 | Constraint | Value | Design consequence |
 |---|---|---|
 | Models on free tier | **Flash tier only** (Pro is paid-only since 2026-04) | All stages start on the current Flash model; drafting quality gate decides upgrades |
-| Rate limits | ~15 RPM, ~1,500 requests/day (Flash); Flash-Lite ~2× RPM | Client-side throttle (token bucket) in the AI layer; jobs queue, never drop |
+| Rate limits | RPM throttled client-side (shared `AiRateLimiter`, `Ai:RequestsPerMinute`); **RPD ≈ 20/day _per model_** on this project — observed 2026-07-10, far below the ~1,500 general figure (see *Free-tier limitations* below) | One model per stage so each gets its own daily bucket; jobs queue on 429, never drop |
 | Batch API | Not on free tier | Batch by **packing** N articles into one analysis request instead |
 | Data usage | Free-tier content may be used by Google to improve products | Only public news content is sent — never secrets/credentials/personal data (06-security.md) |
 | SLA | None | Retries + graceful degradation are mandatory (below) |
+
+### Models per stage (current config, 2026-07-10)
+
+Provider+model are per-stage config (`Ai:Stages:{stage}:Model`); these are the values live in
+`src/Newsroom.Worker/appsettings.json`:
+
+| Stage | Model | Batch | Why this model |
+|---|---|---|---|
+| **Analyse** (summarise/classify) | `gemini-2.5-flash-lite` | 8 articles/request | Highest volume; classification tolerates a lighter model. Own daily bucket. |
+| **Cluster** (trend grouping) | `gemini-2.5-flash` | 30 candidates/request | Own daily bucket so a scraping burst on Analyse can't starve it. |
+| **Draft** (article generation) | `gemini-3.5-flash` | 1 topic/request | Newest/strongest flash — drafting is the quality-critical Bulgarian generation. |
+| **SelfCheck** (claim verification) | `gemini-3.5-flash` | 1 draft/request | Low volume; shares Draft's bucket. |
+
+**Why one model per stage:** the free-tier daily quota is **per project, _per model_**
+(`GenerateRequestsPerDayPerProjectPerModel-FreeTier`). Point every stage at one model and they all
+draw from a single ~20/day allowance (they starve each other); give each bulk stage its own model
+and each gets its own allowance. Analyse and Cluster each get a dedicated model; Draft + SelfCheck
+(both low volume) share one. Model ids are config — re-tune as the Gemini catalog and quotas move.
+
+### Free-tier limitations (observed on this project, 2026-07-10)
+
+The general Gemini figures (~15 RPM / ~1,500 RPD) do **not** apply here. Measured against live
+429s and the AI Studio quota:
+
+- **~20 `generateContent` requests/day, per model** on the free tier — confirmed on
+  `gemini-2.5-flash`, `gemini-3.5-flash`, and `gemini-2.5-flash-lite` (all report
+  `limit: 20`, quota id `GenerateRequestsPerDayPerProjectPerModel-FreeTier`).
+- **`gemini-2.0-flash` / `gemini-2.0-flash-lite` have _zero_ free quota** (`limit: 0`) — they
+  appear in the model list but cannot be used free; never assign a stage to them.
+- Quota **resets at midnight US-Pacific** (~10:00 Europe/Sofia).
+- Only ~3 flash models are usable and each is ~20/day, so the whole free tier tops out at
+  **~60 AI requests/day total**. With batch packing that is roughly **160 articles/day** of
+  analysis + **600 clustering candidates/day** + **~10 draft cycles/day** — enough to chip away at
+  backlogs, **not** enough to keep up with continuous scraping in real time.
+- On quota exhaustion a stage logs `AI temporarily unavailable … will retry later` and resumes
+  after the reset; no work is lost (the item's attempt is not burned — see
+  `AiTransientErrors.IsQuotaExhausted`).
+- **The only way past ~20/day/model is enabling billing** (paid tier) — negligible cost at this
+  volume, and the primary remedy for risk R-11.
+
+Re-verify current limits in AI Studio → <https://aistudio.google.com/rate-limit> (per project), or
+list the models a key can use via `GET https://generativelanguage.googleapis.com/v1beta/models?key=…`
+(a list call — no generate-quota cost).
 
 ### Quota & budget management
 
