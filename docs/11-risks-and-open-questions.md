@@ -32,6 +32,7 @@
 | Q-7 | FB post format preference (link post vs photo post) per category | Phase 6 | Editor |
 | Q-8 | Which Telegram accounts are on the approver allowlist? | Phase 4 | Owner |
 | Q-9 | ~~BgGPT (INSAIT) organizational API access~~ **Parked** (owner 2026-07-02: Gemini only). Reopen only if the Phase-3 golden-set eval fails on Gemini Flash (R-12) — then BgGPT is the first alternative to investigate (research/2026-07-free-ai-providers.md) | — | — |
+| Q-10 | Manual (`/post`, `/new`-verbatim) drafts have no Category/SEO fields — Umbraco publishing requires them. Needs a default-category decision before `Publishing:FacebookOnly` is turned off. | Before `Publishing:FacebookOnly` is disabled | Editor |
 
 ## Assumptions (made in this plan; flag if wrong)
 

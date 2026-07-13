@@ -38,6 +38,12 @@ One message per draft version:
 + photo message with the top image suggestion (attribution in caption)
 + inline keyboard: ✅ Одобри · ✏️ Промени · 🖼 Друга снимка · ❌ Откажи
 
+Editor-authored drafts (`/post`, `/new`) render a different header: `✍️ <topic label>
+(редакторска)` instead of `🔥 … (score …, N източника)` — there is no trend score or scraped
+source count to show. The `📎` meta line is omitted entirely when the draft has no
+category/region/tags (always true for verbatim `/post` drafts, which carry no AI-suggested
+metadata); it still appears normally on `/new` drafts once the AI pipeline fills those fields.
+
 ## Interaction rules
 
 - **Callback handling is idempotent** — double-taps and stale buttons (draft no longer
@@ -71,6 +77,8 @@ each command's response is in [`TelegramJob`](../../src/Newsroom.Worker/Jobs/Tel
 | `/pause` | Stops **draft generation** (runtime flag `Draft:Paused` in `nw_Config`). Scraping and analysis keep running. |
 | `/resume` | Clears the pause flag — draft generation resumes on the next DraftJob cycle. |
 | `/draft <topicId>` | Force-draft a topic even if it is not Hot. |
+| `/post <заглавие и текст>` | Editor-authored **verbatim** article: first line = headline, rest = body. Creates a `Manual` topic + a `PendingReview` draft with no AI involved (zero quota); the normal review card follows — ✅ publishes exactly the sent text, a photo reply attaches an image, ✏️ regenerates **via AI** (costs one Draft request). Empty text is silently ignored. |
+| `/new <бележки>` | Editor-authored **AI** article: the text (notes, press release) becomes the source material; a `Manual` topic with `ForceDraftAtUtc` rides the normal DraftJob pipeline (style guide, validation, self-check against the editor's text, image suggestions). Costs one Draft (+ one SelfCheck) request. Generation failures are reported to the chat (the editor is waiting). Empty text is silently ignored. |
 
 In group chats the `@BotName` suffix (`/status@MyBot`) is accepted and stripped.
 

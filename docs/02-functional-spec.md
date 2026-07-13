@@ -105,6 +105,11 @@ Rules:
 | `/mute <topic-id> [hours]` | Suppress a topic |
 | `/pause` and `/resume` | Pause/resume automatic draft generation (scraping continues) |
 
+Editor-authored articles: `/post <text>` creates a verbatim draft (first line = headline) that
+publishes exactly as sent after ✅, with no AI cost; `/new <text>` feeds the editor's notes
+through the normal AI drafting pipeline as a single-source topic. Both create a synthetic
+`Manual` topic (`nw_Topic.EditorInput` carries the text) and end in the standard review card.
+
 ## Configuration surface (managed without redeploys)
 
 Sources list, polling intervals, trend threshold, sliding-window size, draft TTL, Telegram chat id,
