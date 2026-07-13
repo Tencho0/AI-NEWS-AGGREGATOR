@@ -10,6 +10,16 @@ public static class ManualTopic
     /// <summary>Source name shown for the synthetic bundle article built from EditorInput.</summary>
     public const string SourceName = "Редакция";
 
+    /// <summary>nw_Draft.PromptVersion value marking a row as editor-authored (verbatim) —
+    /// written by <c>DraftRepository.CreateManualArticleAsync</c> for /post drafts. A ✏️
+    /// regeneration of such a draft is AI output and gets its own PromptVersion, so this
+    /// constant identifies the draft row, not the topic.</summary>
+    public const string EditorPromptVersion = "editor-v1";
+
+    /// <summary>nw_Draft.Model value for editor-authored (verbatim) draft rows — shown as
+    /// "модел editor" on the review card.</summary>
+    public const string EditorModelName = "editor";
+
     private const int MaxLabelChars = 60;
 
     /// <summary>Topic label for an editor-authored article: the first non-empty line,

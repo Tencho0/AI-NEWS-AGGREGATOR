@@ -133,7 +133,7 @@ public sealed class DraftRepository(IDbConnectionFactory db) : IDraftRepository
             """
             INSERT INTO dbo.nw_Draft (TopicId, Version, Status, Headline, BodyMarkdown, PromptVersion, Model)
             OUTPUT INSERTED.Id
-            VALUES (@topicId, 1, @status, @headline, @body, N'editor-v1', N'editor')
+            VALUES (@topicId, 1, @status, @headline, @body, @promptVersion, @model)
             """,
             new
             {
@@ -141,6 +141,8 @@ public sealed class DraftRepository(IDbConnectionFactory db) : IDraftRepository
                 status = nameof(DraftStatus.PendingReview),
                 headline = Truncate(headline, 300),
                 body,
+                promptVersion = ManualTopic.EditorPromptVersion,
+                model = ManualTopic.EditorModelName,
             },
             transaction);
 

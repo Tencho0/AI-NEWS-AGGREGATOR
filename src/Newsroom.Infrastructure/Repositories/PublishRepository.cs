@@ -127,7 +127,7 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
             """
             SELECT TOP (@maxCount)
                    d.Id AS DraftId, ISNULL(d.Headline, '') AS Headline,
-                   ISNULL(d.BodyMarkdown, '') AS BodyMarkdown,
+                   ISNULL(d.BodyMarkdown, '') AS BodyMarkdown, d.PromptVersion,
                    img.SourceKind AS ImageKind, img.Url AS ImageUrl
             FROM dbo.nw_Draft d
             OUTER APPLY (
@@ -158,8 +158,16 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
             });
         // Facebook-only: the post IS the article (no site link to carry the full read), so the
         // whole body goes in — not the short teaser the link-post path uses.
+        // Editor-authored drafts (/post — PromptVersion "editor-v1") publish verbatim: the editor
+        // already typed the final text, so stripping markdown markers (e.g. hashtags like
+        // "#Пирин") would mangle it (owner decision 2026-07-13). AI drafts keep going through
+        // ComposeFullBody, which strips markdown. A ✏️-regenerated draft is AI output with its
+        // own PromptVersion, so keying off the draft row (not the topic) is correct here.
         return rows.Select(r => new FacebookPost(
-            r.DraftId, r.Headline, FacebookTeaser.ComposeFullBody(r.BodyMarkdown),
+            r.DraftId, r.Headline,
+            r.PromptVersion == ManualTopic.EditorPromptVersion
+                ? r.BodyMarkdown // already ISNULL(..., '') above — never null
+                : FacebookTeaser.ComposeFullBody(r.BodyMarkdown),
             ArticleUrl: "", ToFacebookImage(r.ImageKind, r.ImageUrl))).ToList();
     }
 
@@ -356,11 +364,13 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
         string ArticleUrl);
 
     /// <summary>Dapper row shape of <see cref="GetApprovedForFacebookAsync"/> — adds the chosen
-    /// image (source kind + URL/local path) to the Facebook-only post.</summary>
+    /// image (source kind + URL/local path) and PromptVersion (to detect editor-authored drafts
+    /// that must publish verbatim) to the Facebook-only post.</summary>
     private sealed record FacebookApprovedRow(
         long DraftId,
         string Headline,
         string BodyMarkdown,
+        string? PromptVersion,
         string? ImageKind,
         string? ImageUrl);
 
