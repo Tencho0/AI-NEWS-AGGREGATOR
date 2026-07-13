@@ -26,6 +26,8 @@ public static class ManualTopic
         var lastBreak = cut.LastIndexOf(' ');
         if (lastBreak > 0)
             cut = cut[..lastBreak];
+        else if (lastBreak < 0)
+            cut = cut[..59];
         return cut.TrimEnd() + "…";
     }
 }

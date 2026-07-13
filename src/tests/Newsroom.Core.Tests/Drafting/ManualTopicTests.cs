@@ -36,4 +36,13 @@ public class ManualTopicTests
     {
         Assert.Equal("Заглавие", ManualTopic.LabelFrom("Заглавие\r\nТяло."));
     }
+
+    [Fact]
+    public void Unbroken_long_token_is_hard_capped_at_60()
+    {
+        var label = ManualTopic.LabelFrom(new string('щ', 70) + " опашка");
+
+        Assert.Equal(60, label.Length);
+        Assert.EndsWith("…", label);
+    }
 }
