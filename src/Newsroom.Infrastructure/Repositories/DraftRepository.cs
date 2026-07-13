@@ -65,6 +65,12 @@ public sealed class DraftRepository(IDbConnectionFactory db) : IDraftRepository
         if (status == nameof(TopicStatus.Done))
             return ForceDraftResult.TopicDone;
 
+        // Check-then-set is not lock-guarded (READ COMMITTED): a concurrent SaveDraftAsync could
+        // insert an active draft between this count and the UPDATE below. Benign and self-healing —
+        // GetTopicsNeedingDraftAsync's NOT EXISTS gate is the real guard, so no duplicate draft is
+        // ever generated; the worst case is a momentarily optimistic "Queued" reply and a
+        // ForceDraftAtUtc marker that a later SaveDraftAsync clears. Accepted at our volume
+        // (mirrors AiBudget's documented reserve/record race).
         var activeDrafts = await connection.ExecuteScalarAsync<int>(
             """
             SELECT COUNT(*) FROM dbo.nw_Draft
