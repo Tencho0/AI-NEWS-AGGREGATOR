@@ -51,6 +51,16 @@ public interface IDraftRepository
     /// that already have an active draft.</summary>
     Task<ForceDraftResult> RequestForcedDraftAsync(int topicId, CancellationToken ct);
 
+    /// <summary>/new: creates a Manual topic carrying the editor's text and sets ForceDraftAtUtc,
+    /// so DraftJob drafts it next cycle (GetTopicBundleAsync synthesizes the bundle from
+    /// EditorInput). Returns the new topic id.</summary>
+    Task<int> CreateManualTopicAsync(string editorText, CancellationToken ct);
+
+    /// <summary>/post: creates a Manual topic plus a verbatim PendingReview draft (no AI, zero
+    /// cost) — the review dispatch loop posts its card. EditorInput keeps the original text so a
+    /// later ✏️ regeneration has source material. Returns the new draft id.</summary>
+    Task<long> CreateManualArticleAsync(string headline, string body, CancellationToken ct);
+
     /// <summary>The topic with its newest <paramref name="maxArticles"/> source articles, each
     /// article's text truncated to <paramref name="maxTextCharsPerArticle"/> characters.
     /// Null when the topic does not exist.</summary>

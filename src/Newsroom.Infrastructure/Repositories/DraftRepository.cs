@@ -91,6 +91,63 @@ public sealed class DraftRepository(IDbConnectionFactory db) : IDraftRepository
         return ForceDraftResult.Queued;
     }
 
+    public async Task<int> CreateManualTopicAsync(string editorText, CancellationToken ct)
+    {
+        using var connection = await db.OpenAsync(ct);
+        return await connection.ExecuteScalarAsync<int>(
+            """
+            INSERT INTO dbo.nw_Topic (Label, Status, EditorInput, ForceDraftAtUtc)
+            OUTPUT INSERTED.Id
+            VALUES (@label, @status, @editorText, SYSUTCDATETIME())
+            """,
+            new
+            {
+                label = ManualTopic.LabelFrom(editorText),
+                status = nameof(TopicStatus.Manual),
+                editorText,
+            });
+    }
+
+    public async Task<long> CreateManualArticleAsync(string headline, string body, CancellationToken ct)
+    {
+        using var connection = await db.OpenAsync(ct);
+        using var transaction = connection.BeginTransaction();
+
+        var topicId = await connection.ExecuteScalarAsync<int>(
+            """
+            INSERT INTO dbo.nw_Topic (Label, Status, EditorInput)
+            OUTPUT INSERTED.Id
+            VALUES (@label, @status, @editorInput)
+            """,
+            new
+            {
+                label = ManualTopic.LabelFrom(headline),
+                status = nameof(TopicStatus.Manual),
+                editorInput = body.Length == 0 ? headline : headline + "\n\n" + body,
+            },
+            transaction);
+
+        // Verbatim: what the editor sent is the article. PromptVersion marks the row as
+        // editor-authored; Model shows as "модел editor" on the card; cost columns default to 0.
+        var draftId = await connection.ExecuteScalarAsync<long>(
+            """
+            INSERT INTO dbo.nw_Draft (TopicId, Version, Status, Headline, BodyMarkdown, PromptVersion, Model)
+            OUTPUT INSERTED.Id
+            VALUES (@topicId, 1, @status, @headline, @body, N'editor-v1', N'editor')
+            """,
+            new
+            {
+                topicId,
+                status = nameof(DraftStatus.PendingReview),
+                headline = Truncate(headline, 300),
+                body,
+            },
+            transaction);
+
+        transaction.Commit();
+        return draftId;
+    }
+
     public async Task<TopicBundle?> GetTopicBundleAsync(
         long topicId, int maxArticles, int maxTextCharsPerArticle, CancellationToken ct)
     {
