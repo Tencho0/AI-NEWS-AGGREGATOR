@@ -528,8 +528,6 @@ public sealed class ReviewRepository(IDbConnectionFactory db, IConfiguration con
         return rows > 0;
     }
 
-    /// <summary>Returns true even if the topic was not muted (the id exists) — the reply
-    /// ("вече не е заглушена") is true either way; only an unknown id returns false.</summary>
     public async Task<bool> UnmuteTopicAsync(int topicId, CancellationToken ct)
     {
         using var connection = await db.OpenAsync(ct);
@@ -580,7 +578,9 @@ public sealed class ReviewRepository(IDbConnectionFactory db, IConfiguration con
             GROUP BY Stage
             """,
             new { todayUtc });
-        var used = usedRows.ToDictionary(r => r.Stage, r => r.Used, StringComparer.OrdinalIgnoreCase);
+        var used = usedRows
+            .GroupBy(r => r.Stage, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Sum(r => r.Used), StringComparer.OrdinalIgnoreCase);
 
         // Show the union of configured stages (cap known, maybe 0 used) and stages actually seen
         // in today's ledger (so an unconfigured-but-used stage is not hidden). Cap defaults to the
