@@ -99,7 +99,7 @@ public sealed class DraftJob(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogError(ex, "Could not query Hot topics needing a draft");
+            logger.LogError(ex, "Could not query topics needing a draft");
             return; // the DB is unwell; drafting now would fail too
         }
         if (topics.Count == 0)

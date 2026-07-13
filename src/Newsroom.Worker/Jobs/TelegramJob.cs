@@ -1,3 +1,4 @@
+using Newsroom.Core.Drafting;
 using Newsroom.Core.Operations;
 using Newsroom.Core.Review;
 using Newsroom.Infrastructure.Images;
@@ -17,6 +18,7 @@ namespace Newsroom.Worker.Jobs;
 /// </summary>
 public sealed class TelegramJob(
     IReviewRepository reviews,
+    IDraftRepository drafts,
     Lazy<ITelegramGateway> gateway,
     IJobHeartbeat heartbeat,
     IConfiguration configuration,
@@ -26,6 +28,21 @@ public sealed class TelegramJob(
     public const string DraftPausedKey = "Draft:Paused";
 
     private const int TopicsToShow = 10;
+
+    private const string HelpText =
+        "🤖 Команди\n" +
+        "/status — състояние на конвейера\n" +
+        "/topics — отворени теми\n" +
+        "/quota — изразходвана AI квота днес\n" +
+        "/health — състояние на задачите\n" +
+        "/draft <номер> — пусни тема за чернова\n" +
+        "/mute <номер> [часове] — заглуши тема (по подразбиране 24 ч.)\n" +
+        "/unmute <номер> — отзаглуши тема\n" +
+        "/pause — спри генерирането на чернови\n" +
+        "/resume — възобнови генерирането\n" +
+        "\n" +
+        "Върху картичка: ✅ одобри · ✏️ промени · 🖼 друга снимка · ❌ откажи. " +
+        "Отговор с текст = инструкции за промяна; отговор със снимка = прикачи снимка.";
 
     /// <summary>Where editor photo uploads land (Images:EditorUploadDir; a relative value is
     /// resolved against the worker's base directory so publish-time reads find the files).</summary>
@@ -142,6 +159,14 @@ public sealed class TelegramJob(
 
     private static string Truncate(string value, int max) =>
         value.Length <= max ? value : value[..max] + "…";
+
+    private static string ForceDraftReply(int topicId, ForceDraftResult result) => result switch
+    {
+        ForceDraftResult.Queued => $"⚡ Тема #{topicId} е пусната за чернова.",
+        ForceDraftResult.AlreadyActive => $"Тема #{topicId} вече има активна чернова.",
+        ForceDraftResult.TopicDone => $"Тема #{topicId} е приключена.",
+        _ => $"Няма такава тема (#{topicId}).", // TopicNotFound
+    };
 
     /// <summary>(b) TTL sweep, at most once per minute: unactioned drafts expire
     /// (docs/02-functional-spec.md §5 — news goes stale).</summary>
@@ -399,6 +424,33 @@ public sealed class TelegramJob(
                 await reviews.SetRuntimeFlagAsync(DraftPausedKey, "false", ct);
                 await SendTextAsync(text.ChatId, "▶️ Генерирането на чернови е възобновено.", ct);
                 logger.LogWarning("Draft generation resumed by {User} via /resume", text.UserName ?? text.UserId.ToString());
+                break;
+
+            case ShowHelp:
+                await SendTextAsync(text.ChatId, HelpText, ct);
+                break;
+
+            case ShowQuota:
+                await SendTextAsync(text.ChatId, await reviews.BuildQuotaSummaryAsync(ct), ct);
+                break;
+
+            case ShowHealth:
+                await SendTextAsync(text.ChatId, await reviews.BuildHealthSummaryAsync(ct), ct);
+                break;
+
+            case UnmuteTopic unmute:
+                var unmuted = await reviews.UnmuteTopicAsync(unmute.TopicId, ct);
+                await SendTextAsync(text.ChatId, unmuted
+                    ? $"🔊 Тема #{unmute.TopicId} вече не е заглушена."
+                    : $"Няма такава тема (#{unmute.TopicId}).", ct);
+                break;
+
+            case ForceDraftTopic force:
+                var forceResult = await drafts.RequestForcedDraftAsync(force.TopicId, ct);
+                if (forceResult == ForceDraftResult.Queued)
+                    logger.LogInformation("Topic {TopicId} force-drafted by {User} via /draft",
+                        force.TopicId, text.UserName ?? text.UserId.ToString());
+                await SendTextAsync(text.ChatId, ForceDraftReply(force.TopicId, forceResult), ct);
                 break;
 
             case Ignore:
