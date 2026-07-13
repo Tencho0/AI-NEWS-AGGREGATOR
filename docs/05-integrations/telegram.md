@@ -1,6 +1,6 @@
 # Integration — Telegram Review Bot
 
-**Status:** Draft · **Last updated:** 2026-07-02 · **ADR:** 0006
+**Status:** Draft · **Last updated:** 2026-07-13 · **ADR:** 0006
 
 ## Approach
 
@@ -52,8 +52,39 @@ One message per draft version:
 
 ## Commands
 
-`/status`, `/draft <url>`, `/topics`, `/mute`, `/pause`, `/resume` — defined in
-[02-functional-spec.md](../02-functional-spec.md). Commands are also allowlist-gated.
+All commands are **allowlist-gated** (same authorization model as the review flow): only
+editor user ids in the review chat are honoured; every other update is silently ignored.
+Slash-command routing lives in [`ReviewUpdateRouter.RouteText`](../../src/Newsroom.Core/Review/ReviewUpdateRouter.cs);
+each command's response is in [`TelegramJob`](../../src/Newsroom.Worker/Jobs/TelegramJob.cs).
+
+### Slash commands (typed in the review chat)
+
+| Command | Effect |
+|---|---|
+| `/status` | Posts a status summary of the worker (queue/draft state). |
+| `/topics` | Lists the top tracked topics. |
+| `/mute <topicId> [hours]` | Silences one topic. `hours` is optional and **defaults to 24**; e.g. `/mute 42` or `/mute 42 6`. Replies with confirmation or "няма такава тема" if the id is unknown. |
+| `/pause` | Stops **draft generation** (runtime flag `Draft:Paused` in `nw_Config`). Scraping and analysis keep running. |
+| `/resume` | Clears the pause flag — draft generation resumes on the next DraftJob cycle. |
+
+In group chats the `@BotName` suffix (`/status@MyBot`) is accepted and stripped.
+
+### Card actions (per draft, not typed)
+
+These act on a specific draft the bot posted; they arrive as inline-keyboard callbacks or as
+replies to the review card:
+
+| Action | Trigger | Effect |
+|---|---|---|
+| Approve | ✅ button | Publishes the draft. |
+| Reject | ❌ button | Discards the draft. |
+| Request changes | ✏️ button, then a text reply | Opens a pending conversation; the next message becomes regeneration instructions. |
+| Cycle image | 🖼 button | Shows the next stock image suggestion. |
+| Submit instructions | Text reply to a review card | Binds the words to that card's draft as change instructions (unambiguous even with several drafts waiting). |
+| Attach photo | Photo reply to a review card | Stores the upload as `editor-upload`; it wins image selection. |
+
+There is **no `/help` or `/start`** — unrecognised text is silently ignored. `/draft <url>`
+is a planned Phase 4b command and is **not routed yet**.
 
 ## Implementation notes (v1 — Phase 4a)
 
