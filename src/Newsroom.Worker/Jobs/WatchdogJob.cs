@@ -1,6 +1,6 @@
 using Newsroom.Core.Operations;
 using Newsroom.Core.Review;
-using Newsroom.Infrastructure.Publishing;
+using Newsroom.Infrastructure.Operations;
 using Newsroom.Infrastructure.Review;
 
 namespace Newsroom.Worker.Jobs;
@@ -59,7 +59,7 @@ public sealed class WatchdogJob(
         }
 
         var nowUtc = DateTime.UtcNow;
-        foreach (var (jobName, allowedStaleness) in BuildExpectations())
+        foreach (var (jobName, allowedStaleness) in JobStalenessPolicy.BuildExpectations(configuration))
         {
             ct.ThrowIfCancellationRequested();
 
@@ -74,38 +74,6 @@ public sealed class WatchdogJob(
             await TryAlertAsync(jobName, age, nowUtc, ct);
         }
     }
-
-    /// <summary>
-    /// The expected-jobs table: allowance = 3× the interval each job configures itself with
-    /// (docs/07-operations.md). TelegramJob has no interval — its loop is paced by the long
-    /// poll, so 3× the poll timeout plus a minute of processing slack. Telegram and Publish
-    /// only appear when configured; unconfigured jobs log one warning and stay dormant, which
-    /// must not page anyone.
-    /// </summary>
-    private List<(string JobName, TimeSpan AllowedStaleness)> BuildExpectations()
-    {
-        var expectations = new List<(string, TimeSpan)>
-        {
-            (JobNames.Scrape, Allowance("Scrape:CheckSeconds", 60)),
-            (JobNames.Analyse, Allowance("Ai:Stages:Analyse:CheckSeconds", 120)),
-            (JobNames.Trend, Allowance("Ai:Stages:Cluster:CheckSeconds", 300)),
-            (JobNames.Draft, Allowance("Ai:Stages:Draft:CheckSeconds", 300)),
-        };
-
-        var telegram = TelegramOptions.From(configuration);
-        if (telegram.IsConfigured)
-            expectations.Add((JobNames.Telegram,
-                TimeSpan.FromSeconds(3 * telegram.PollTimeoutSeconds + 60)));
-
-        var umbraco = UmbracoOptions.From(configuration);
-        if (umbraco.IsConfigured)
-            expectations.Add((JobNames.Publish, TimeSpan.FromSeconds(3 * umbraco.CheckSeconds)));
-
-        return expectations;
-    }
-
-    private TimeSpan Allowance(string intervalKey, int defaultSeconds) =>
-        TimeSpan.FromSeconds(3 * configuration.GetValue(intervalKey, defaultSeconds));
 
     /// <summary>One alert per job per hour (in-memory: a restart resets the limiter, but the
     /// startup grace in <see cref="WatchdogPolicy"/> keeps that quiet). Skipped when Telegram

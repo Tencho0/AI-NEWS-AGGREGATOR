@@ -7,11 +7,11 @@ using Dapper;
 using Microsoft.Extensions.Configuration;
 
 using Newsroom.Core.Drafting;
-using Newsroom.Core.Operations;
 using Newsroom.Core.Review;
 using Newsroom.Core.Scraping;
 using Newsroom.Core.Trends;
 using Newsroom.Infrastructure.Database;
+using Newsroom.Infrastructure.Operations;
 
 namespace Newsroom.Infrastructure.Repositories;
 
@@ -604,13 +604,8 @@ public sealed class ReviewRepository(IDbConnectionFactory db, IConfiguration con
 
     public async Task<string> BuildHealthSummaryAsync(CancellationToken ct)
     {
-        var staleMinutes = configuration.GetValue("Ops:Health:StaleMinutes", 15);
-        string[] jobNames =
-        [
-            JobNames.Scrape, JobNames.Analyse, JobNames.Trend,
-            JobNames.Draft, JobNames.Telegram, JobNames.Publish,
-        ];
-        var keys = jobNames.Select(j => JobHeartbeat.KeyPrefix + j).ToArray();
+        var expectations = JobStalenessPolicy.BuildExpectations(configuration);
+        var keys = expectations.Select(e => JobHeartbeat.KeyPrefix + e.JobName).ToArray();
 
         using var connection = await db.OpenAsync(ct);
         var rows = await connection.QueryAsync<(string Key, string Value)>(
@@ -620,17 +615,18 @@ public sealed class ReviewRepository(IDbConnectionFactory db, IConfiguration con
             new { keys });
         var beats = rows.ToDictionary(r => r.Key, r => r.Value, StringComparer.Ordinal);
 
-        var jobs = jobNames
-            .Select(job => (
-                Job: job,
-                LastBeatUtc: beats.TryGetValue(JobHeartbeat.KeyPrefix + job, out var v)
+        var jobs = expectations
+            .Select(e => (
+                Job: e.JobName,
+                LastBeatUtc: beats.TryGetValue(JobHeartbeat.KeyPrefix + e.JobName, out var v)
                     && DateTime.TryParse(v, CultureInfo.InvariantCulture,
                         DateTimeStyles.RoundtripKind, out var parsed)
                     ? parsed
-                    : (DateTime?)null))
+                    : (DateTime?)null,
+                e.Allowance))
             .ToList();
 
-        return FormatHealthSummary(jobs, DateTime.UtcNow, staleMinutes);
+        return FormatHealthSummary(jobs, DateTime.UtcNow);
     }
 
     /// <summary>Bulgarian /quota body: one line per AI stage, "used/cap", ⚠️ when at/over cap.</summary>
@@ -651,13 +647,13 @@ public sealed class ReviewRepository(IDbConnectionFactory db, IConfiguration con
     }
 
     /// <summary>Bulgarian /health body: one line per job, minutes since its last heartbeat,
-    /// ⚠️ закъснява when older than <paramref name="staleMinutes"/>, няма when never seen.</summary>
+    /// ⚠️ закъснява when the beat is older than that job's allowance, няма when never seen.</summary>
     public static string FormatHealthSummary(
-        IReadOnlyList<(string Job, DateTime? LastBeatUtc)> jobs, DateTime nowUtc, int staleMinutes)
+        IReadOnlyList<(string Job, DateTime? LastBeatUtc, TimeSpan Allowance)> jobs, DateTime nowUtc)
     {
         var summary = new StringBuilder();
         summary.Append("🩺 Състояние на задачите");
-        foreach (var (job, lastBeat) in jobs)
+        foreach (var (job, lastBeat, allowance) in jobs)
         {
             summary.Append('\n').Append(job).Append(": ");
             if (lastBeat is not { } beat)
@@ -666,9 +662,10 @@ public sealed class ReviewRepository(IDbConnectionFactory db, IConfiguration con
                 continue;
             }
 
-            var minutes = (int)Math.Max(0, (nowUtc - beat).TotalMinutes);
+            var age = nowUtc - beat;
+            var minutes = (int)Math.Max(0, age.TotalMinutes);
             summary.Append("преди ").Append(minutes).Append(" мин");
-            if (minutes > staleMinutes)
+            if (age > allowance)
                 summary.Append(" ⚠️ закъснява");
         }
         return summary.ToString();
