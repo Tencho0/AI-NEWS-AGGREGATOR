@@ -153,13 +153,30 @@ public sealed class DraftRepository(IDbConnectionFactory db) : IDraftRepository
     {
         using var connection = await db.OpenAsync(ct);
 
-        var label = await connection.ExecuteScalarAsync<string?>(
+        var topic = (await connection.QueryAsync<(string Label, string Status, string? EditorInput)>(
             """
-            SELECT Label FROM dbo.nw_Topic WHERE Id = @topicId
+            SELECT Label, Status, EditorInput FROM dbo.nw_Topic WHERE Id = @topicId
             """,
-            new { topicId });
-        if (label is null)
+            new { topicId })).FirstOrDefault();
+        if (topic.Label is null)
             return null;
+
+        // Manual topics (/post, /new) have no scraped sources — the editor's text IS the source.
+        // One synthetic article makes generation, self-check and ✏️ regeneration work unchanged.
+        if (topic.Status == nameof(TopicStatus.Manual) && !string.IsNullOrWhiteSpace(topic.EditorInput))
+        {
+            var editorText = topic.EditorInput.Length <= maxTextCharsPerArticle
+                ? topic.EditorInput
+                : topic.EditorInput[..maxTextCharsPerArticle];
+            return new TopicBundle(topicId, topic.Label,
+            [
+                new TopicSourceArticle(
+                    ArticleId: 0, Title: topic.Label, SourceName: ManualTopic.SourceName,
+                    Url: "", PublishedAtUtc: null, Summary: "", Text: editorText),
+            ]);
+        }
+
+        var label = topic.Label;
 
         var articles = await connection.QueryAsync<TopicSourceArticle>(
             """
@@ -189,6 +206,7 @@ public sealed class DraftRepository(IDbConnectionFactory db) : IDraftRepository
         CancellationToken ct)
     {
         var sources = bundle.Articles
+            .Where(a => !string.IsNullOrEmpty(a.Url)) // synthetic Manual-topic article has no URL
             .Select(a => new SourceRef(a.Url, a.SourceName))
             .ToList();
 
@@ -309,6 +327,7 @@ public sealed class DraftRepository(IDbConnectionFactory db) : IDraftRepository
         CancellationToken ct)
     {
         var sources = bundle.Articles
+            .Where(a => !string.IsNullOrEmpty(a.Url)) // synthetic Manual-topic article has no URL
             .Select(a => new SourceRef(a.Url, a.SourceName))
             .ToList();
 

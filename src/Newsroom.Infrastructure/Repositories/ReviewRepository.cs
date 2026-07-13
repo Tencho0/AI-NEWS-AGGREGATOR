@@ -87,11 +87,11 @@ public sealed class ReviewRepository(IDbConnectionFactory db, IConfiguration con
             FROM dbo.nw_Draft d
             JOIN dbo.nw_Topic t ON t.Id = d.TopicId
             WHERE d.Status = @failedStatus
-              AND d.RegenInstructions IS NOT NULL
+              AND (d.RegenInstructions IS NOT NULL OR t.Status = @manualStatus)
               AND d.TelegramMessageId IS NULL
             ORDER BY d.Id
             """,
-            new { max, failedStatus = nameof(DraftStatus.GenerationFailed) });
+            new { max, failedStatus = nameof(DraftStatus.GenerationFailed), manualStatus = nameof(TopicStatus.Manual) });
         return rows.ToList();
     }
 
