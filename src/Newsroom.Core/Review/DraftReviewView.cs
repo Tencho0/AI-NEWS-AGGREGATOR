@@ -24,4 +24,5 @@ public sealed record DraftReviewView(
     decimal Cost,
     string? Model,
     int ImageCount,
-    long? TelegramMessageId);
+    long? TelegramMessageId,
+    bool IsManual = false);

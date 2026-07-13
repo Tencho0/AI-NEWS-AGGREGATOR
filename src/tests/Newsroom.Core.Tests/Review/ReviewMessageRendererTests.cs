@@ -11,7 +11,11 @@ public class ReviewMessageRendererTests
         int sourceCount = 5,
         IReadOnlyList<(string Name, string Url)>? sources = null,
         IReadOnlyList<string>? flaggedClaims = null,
-        string? model = "gemini-2.5-flash") => new(
+        string? model = "gemini-2.5-flash",
+        string category = "Общество",
+        string? region = "Благоевград",
+        IReadOnlyList<string>? tags = null,
+        bool isManual = false) => new(
         DraftId: 42,
         Version: 2,
         TopicLabel: "Земетресение в Югозапада",
@@ -20,16 +24,17 @@ public class ReviewMessageRendererTests
         Headline: headline,
         Subtitle: subtitle,
         BodyMarkdown: body,
-        Category: "Общество",
-        Region: "Благоевград",
-        Tags: ["земетресение", "Благоевград"],
+        Category: category,
+        Region: region,
+        Tags: tags ?? ["земетресение", "Благоевград"],
         Sources: sources ?? [("БТА", "https://example.com/1"), ("Дневник", "https://example.com/2")],
         FlaggedClaims: flaggedClaims ?? [],
         Confidence: 0.85,
         Cost: 0.0012m,
         Model: model,
         ImageCount: 2,
-        TelegramMessageId: null);
+        TelegramMessageId: null,
+        IsManual: isManual);
 
     [Fact]
     public void Renders_the_documented_layout()
@@ -134,5 +139,23 @@ public class ReviewMessageRendererTests
         var suffix = ReviewMessageRenderer.RenderResolvedSuffix("✅ Одобрено от <Иван>");
 
         Assert.Equal("\n\n✅ Одобрено от &lt;Иван&gt;", suffix);
+    }
+
+    [Fact]
+    public void Manual_topics_render_the_editorial_header()
+    {
+        var html = ReviewMessageRenderer.RenderHtml(View(isManual: true));
+
+        Assert.StartsWith("✍️ Земетресение в Югозапада (редакторска)\n", html);
+        Assert.DoesNotContain("score", html);
+        Assert.DoesNotContain("източника", html);
+    }
+
+    [Fact]
+    public void Meta_line_is_skipped_when_category_region_and_tags_are_empty()
+    {
+        var html = ReviewMessageRenderer.RenderHtml(View(category: "", region: null, tags: []));
+
+        Assert.DoesNotContain("📎", html);
     }
 }

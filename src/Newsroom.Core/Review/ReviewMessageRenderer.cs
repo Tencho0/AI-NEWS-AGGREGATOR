@@ -18,10 +18,18 @@ public static class ReviewMessageRenderer
     {
         var html = new StringBuilder();
 
-        html.Append("🔥 ").Append(Escape(v.TopicLabel))
-            .Append(" (score ").Append(v.TopicScore.ToString("0.0", CultureInfo.InvariantCulture))
-            .Append(", ").Append(v.SourceCount)
-            .Append(v.SourceCount == 1 ? " източник)" : " източника)").Append('\n');
+        if (v.IsManual)
+        {
+            // Editor-authored (/post, /new): no trend score and no scraped sources to count.
+            html.Append("✍️ ").Append(Escape(v.TopicLabel)).Append(" (редакторска)").Append('\n');
+        }
+        else
+        {
+            html.Append("🔥 ").Append(Escape(v.TopicLabel))
+                .Append(" (score ").Append(v.TopicScore.ToString("0.0", CultureInfo.InvariantCulture))
+                .Append(", ").Append(v.SourceCount)
+                .Append(v.SourceCount == 1 ? " източник)" : " източника)").Append('\n');
+        }
         html.Append("━━━━━━━━━━━━━━━").Append('\n');
 
         html.Append("<b>").Append(Escape(v.Headline)).Append("</b>").Append('\n');
@@ -30,12 +38,15 @@ public static class ReviewMessageRenderer
 
         html.Append('\n').Append(Escape(TruncateOnWordBoundary(v.BodyMarkdown, MaxBodyChars))).Append('\n');
 
-        html.Append('\n').Append("📎 Категория: ").Append(Escape(v.Category));
-        if (!string.IsNullOrWhiteSpace(v.Region))
-            html.Append(" · Регион: ").Append(Escape(v.Region));
-        if (v.Tags.Count > 0)
-            html.Append(" · Тагове: ").Append(Escape(string.Join(", ", v.Tags)));
-        html.Append('\n');
+        if (!string.IsNullOrWhiteSpace(v.Category) || !string.IsNullOrWhiteSpace(v.Region) || v.Tags.Count > 0)
+        {
+            html.Append('\n').Append("📎 Категория: ").Append(Escape(v.Category));
+            if (!string.IsNullOrWhiteSpace(v.Region))
+                html.Append(" · Регион: ").Append(Escape(v.Region));
+            if (v.Tags.Count > 0)
+                html.Append(" · Тагове: ").Append(Escape(string.Join(", ", v.Tags)));
+            html.Append('\n');
+        }
 
         if (v.Sources.Count > 0)
         {

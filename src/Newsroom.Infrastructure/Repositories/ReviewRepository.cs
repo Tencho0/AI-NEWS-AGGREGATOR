@@ -43,7 +43,8 @@ public sealed class ReviewRepository(IDbConnectionFactory db, IConfiguration con
                ISNULL(d.Category, '') AS Category, d.Region, d.TagsJson, d.SourcesJson,
                d.FlaggedClaimsJson, d.Confidence, d.Cost, d.Model,
                (SELECT COUNT(*) FROM dbo.nw_DraftImage di WHERE di.DraftId = d.Id) AS ImageCount,
-               d.TelegramMessageId
+               d.TelegramMessageId,
+               CASE WHEN t.Status = N'Manual' THEN CAST(1 AS bit) ELSE CAST(0 AS bit) END AS IsManual
         FROM dbo.nw_Draft d
         JOIN dbo.nw_Topic t ON t.Id = d.TopicId
         """;
@@ -724,7 +725,8 @@ public sealed class ReviewRepository(IDbConnectionFactory db, IConfiguration con
         r.Cost,
         r.Model,
         r.ImageCount,
-        r.TelegramMessageId);
+        r.TelegramMessageId,
+        r.IsManual);
 
     /// <summary>JSON columns are model output stored as-is; null or malformed reads as empty.</summary>
     private static IReadOnlyList<string> ParseStringList(string? json)
@@ -782,7 +784,8 @@ public sealed class ReviewRepository(IDbConnectionFactory db, IConfiguration con
         decimal Cost,
         string? Model,
         int ImageCount,
-        long? TelegramMessageId);
+        long? TelegramMessageId,
+        bool IsManual);
 
     /// <summary>Wire shape of one nw_Draft.SourcesJson entry (see DraftRepository.SourceRef).</summary>
     private sealed record SourceRef(string? Url, string? SourceName);
