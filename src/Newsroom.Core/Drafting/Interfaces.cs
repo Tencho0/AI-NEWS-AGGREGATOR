@@ -41,9 +41,15 @@ public interface IDraftRepository
 {
     /// <summary>Hot topics that should get a draft: not muted (MutedUntilUtc null or past),
     /// generation attempts below the cap, and no draft in any status other than
-    /// Rejected/Expired/GenerationFailed/Superseded (those are history; anything else is active).</summary>
-    Task<IReadOnlyList<(long TopicId, string Label)>> GetHotTopicsNeedingDraftAsync(
+    /// Rejected/Expired/GenerationFailed/Superseded (those are history; anything else is active).
+    /// Also includes topics with ForceDraftAtUtc set, regardless of Hot status or mute.</summary>
+    Task<IReadOnlyList<(long TopicId, string Label)>> GetTopicsNeedingDraftAsync(
         int maxAttempts, int maxCount, CancellationToken ct);
+
+    /// <summary>Editor /draft &lt;topicId&gt;: mark a topic for drafting regardless of Hot status.
+    /// Resets DraftAttempts so an exhausted topic can be retried. Refuses Done topics and topics
+    /// that already have an active draft.</summary>
+    Task<ForceDraftResult> RequestForcedDraftAsync(int topicId, CancellationToken ct);
 
     /// <summary>The topic with its newest <paramref name="maxArticles"/> source articles, each
     /// article's text truncated to <paramref name="maxTextCharsPerArticle"/> characters.
@@ -66,7 +72,7 @@ public interface IDraftRepository
 
     /// <summary>Records a failed generation: inserts a GenerationFailed draft row carrying the
     /// error and increments nw_Topic.DraftAttempts (poison protection — topics at the cap stop
-    /// being selected by <see cref="GetHotTopicsNeedingDraftAsync"/>).</summary>
+    /// being selected by <see cref="GetTopicsNeedingDraftAsync"/>).</summary>
     /// <returns>True when the topic has now reached <paramref name="maxAttempts"/>.</returns>
     Task<bool> RecordGenerationFailureAsync(
         long topicId, string error, int maxAttempts, CancellationToken ct);

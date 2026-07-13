@@ -29,7 +29,7 @@ public sealed class DraftRepository(IDbConnectionFactory db) : IDraftRepository
         nameof(DraftStatus.Superseded),
     ];
 
-    public async Task<IReadOnlyList<(long TopicId, string Label)>> GetHotTopicsNeedingDraftAsync(
+    public async Task<IReadOnlyList<(long TopicId, string Label)>> GetTopicsNeedingDraftAsync(
         int maxAttempts, int maxCount, CancellationToken ct)
     {
         using var connection = await db.OpenAsync(ct);
@@ -37,16 +37,52 @@ public sealed class DraftRepository(IDbConnectionFactory db) : IDraftRepository
             """
             SELECT TOP (@maxCount) CAST(t.Id AS bigint) AS TopicId, t.Label
             FROM dbo.nw_Topic t
-            WHERE t.Status = @hotStatus
-              AND (t.MutedUntilUtc IS NULL OR t.MutedUntilUtc <= SYSUTCDATETIME())
+            WHERE (
+                    (t.Status = @hotStatus
+                     AND (t.MutedUntilUtc IS NULL OR t.MutedUntilUtc <= SYSUTCDATETIME()))
+                    OR t.ForceDraftAtUtc IS NOT NULL
+                  )
               AND t.DraftAttempts < @maxAttempts
               AND NOT EXISTS (
                   SELECT 1 FROM dbo.nw_Draft d
                   WHERE d.TopicId = t.Id AND d.Status NOT IN @inactiveStatuses)
-            ORDER BY t.Score DESC, t.Id
+            ORDER BY CASE WHEN t.ForceDraftAtUtc IS NOT NULL THEN 0 ELSE 1 END, t.Score DESC, t.Id
             """,
             new { maxCount, maxAttempts, hotStatus = nameof(TopicStatus.Hot), inactiveStatuses = InactiveDraftStatuses });
         return rows.ToList();
+    }
+
+    public async Task<ForceDraftResult> RequestForcedDraftAsync(int topicId, CancellationToken ct)
+    {
+        using var connection = await db.OpenAsync(ct);
+        using var transaction = connection.BeginTransaction();
+
+        var status = await connection.ExecuteScalarAsync<string?>(
+            "SELECT Status FROM dbo.nw_Topic WHERE Id = @topicId",
+            new { topicId }, transaction);
+        if (status is null)
+            return ForceDraftResult.TopicNotFound;
+        if (status == nameof(TopicStatus.Done))
+            return ForceDraftResult.TopicDone;
+
+        var activeDrafts = await connection.ExecuteScalarAsync<int>(
+            """
+            SELECT COUNT(*) FROM dbo.nw_Draft
+            WHERE TopicId = @topicId AND Status NOT IN @inactiveStatuses
+            """,
+            new { topicId, inactiveStatuses = InactiveDraftStatuses }, transaction);
+        if (activeDrafts > 0)
+            return ForceDraftResult.AlreadyActive;
+
+        await connection.ExecuteAsync(
+            """
+            UPDATE dbo.nw_Topic
+            SET ForceDraftAtUtc = SYSUTCDATETIME(), DraftAttempts = 0
+            WHERE Id = @topicId
+            """,
+            new { topicId }, transaction);
+        transaction.Commit();
+        return ForceDraftResult.Queued;
     }
 
     public async Task<TopicBundle?> GetTopicBundleAsync(
@@ -138,6 +174,13 @@ public sealed class DraftRepository(IDbConnectionFactory db) : IDraftRepository
             transaction);
 
         await InsertImagesAsync(connection, transaction, draftId, content, images, ct);
+
+        // A forced draft (ForceDraftAtUtc) is now fulfilled; clear the marker so a later
+        // reject/expire of this draft does not silently re-trigger generation.
+        await connection.ExecuteAsync(
+            "UPDATE dbo.nw_Topic SET ForceDraftAtUtc = NULL WHERE Id = @topicId",
+            new { topicId = bundle.TopicId },
+            transaction);
 
         transaction.Commit();
         return draftId;

@@ -95,7 +95,7 @@ public sealed class DraftJob(
         IReadOnlyList<(long TopicId, string Label)> topics;
         try
         {
-            topics = await drafts.GetHotTopicsNeedingDraftAsync(maxAttempts, maxPerCycle, ct);
+            topics = await drafts.GetTopicsNeedingDraftAsync(maxAttempts, maxPerCycle, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
