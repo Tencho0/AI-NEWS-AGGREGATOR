@@ -548,6 +548,47 @@ public sealed class ReviewRepository(IDbConnectionFactory db) : IReviewRepositor
         return bool.TryParse(value, out var flag) ? flag : defaultValue;
     }
 
+    /// <summary>Bulgarian /quota body: one line per AI stage, "used/cap", ⚠️ when at/over cap.</summary>
+    public static string FormatQuotaSummary(IReadOnlyList<(string Stage, int Used, int Cap)> stages)
+    {
+        if (stages.Count == 0)
+            return "Няма конфигурирани AI етапи.";
+
+        var summary = new StringBuilder();
+        summary.Append("🎫 AI квота днес");
+        foreach (var (stage, used, cap) in stages)
+        {
+            summary.Append('\n').Append(stage).Append(' ').Append(used).Append('/').Append(cap);
+            if (used >= cap)
+                summary.Append(" ⚠️");
+        }
+        return summary.ToString();
+    }
+
+    /// <summary>Bulgarian /health body: one line per job, minutes since its last heartbeat,
+    /// ⚠️ закъснява when older than <paramref name="staleMinutes"/>, няма when never seen.</summary>
+    public static string FormatHealthSummary(
+        IReadOnlyList<(string Job, DateTime? LastBeatUtc)> jobs, DateTime nowUtc, int staleMinutes)
+    {
+        var summary = new StringBuilder();
+        summary.Append("🩺 Състояние на задачите");
+        foreach (var (job, lastBeat) in jobs)
+        {
+            summary.Append('\n').Append(job).Append(": ");
+            if (lastBeat is not { } beat)
+            {
+                summary.Append("няма");
+                continue;
+            }
+
+            var minutes = (int)Math.Max(0, (nowUtc - beat).TotalMinutes);
+            summary.Append("преди ").Append(minutes).Append(" мин");
+            if (minutes > staleMinutes)
+                summary.Append(" ⚠️ закъснява");
+        }
+        return summary.ToString();
+    }
+
     private async Task<bool> TryResolveAsync(
         long draftId, DraftStatus newStatus, string action, long userId, string? userName,
         CancellationToken ct)
