@@ -91,8 +91,10 @@ reported without starting a review clock). Transient AI-quota failures keep retr
    ✏️ regenerates **via AI** (costs one Draft request — the only AI touch a `/post` article can
    have, and only if the editor asks).
 
-Published FB-only post = `{headline}\n\n{ComposeFullBody(body)}` — the current whole-body
-composition; line breaks preserved as authored (existing behaviour).
+Published FB-only post = `{headline}\n\n{body}` with the body **verbatim** (owner decision
+2026-07-13): editor-authored drafts (`PromptVersion = editor-v1`) bypass the markdown-stripping
+`ComposeFullBody`, so `#hashtags`, `*` and `[text](url)` publish exactly as typed. AI drafts —
+including ✏️-regenerated versions of a `/post` article — keep the stripping composition.
 
 ### Routing (`ReviewUpdateRouter.RouteText`)
 

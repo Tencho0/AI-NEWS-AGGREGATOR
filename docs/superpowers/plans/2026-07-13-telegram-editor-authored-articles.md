@@ -838,6 +838,18 @@ The repository SQL has no automated harness — verify these flows live (DryRun 
 2. Photo reply to a `/post` card → image attaches (editor-upload) and rides the FB photo post.
 3. `/new` with a couple of sentences of notes → "✍️ Статията се пише…" reply; a normal-looking review card arrives after the next Draft cycle (≤ ~5 min); `/quota` shows the Draft request; sources section is absent (no URL-less link).
 4. ✏️ on the `/new` card with an instruction → new version arrives (regeneration works from `EditorInput`).
-5. `/new` when the Draft budget is exhausted (or force an error) → the ⚠️ failure notice appears instead of silence.
+5. `/new` that fails validation (or another permanent error) → the ⚠️ failure notice appears.
+   Note: an **exhausted Draft budget or 429 is silence by design** — no notice; the card arrives
+   after the next quota window.
 6. `/topics` does not list the Manual topics; `/help` shows the two new commands.
 7. `/post` with no text and `/new` with no text → no reply (silent ignore, existing bad-args behaviour).
+8. `/post` with `#хаштаг`, a `*` and `[текст](url)` in the body → the published FB post matches the
+   card preview character-for-character (verbatim publish, owner decision 2026-07-13).
+9. `/post` a story the scrapers will also cover → the scraped article forms its **own** topic in
+   `/topics`, and the manual card keeps its ✍️ header through approve → publish edits.
+10. `/mute <id>` with the topic id from the `/new` reply while generation is queued → generation
+    still proceeds (known: the force branch ignores mutes) — confirm acceptable.
+11. `/draft <topicId>` on a failed or rejected manual topic → revives it: AI regenerates from the
+    stored editor text.
+12. `/new` issued while `/pause` is active → confirmation arrives but no card until `/resume`
+    (nothing warns the editor about the pause).
