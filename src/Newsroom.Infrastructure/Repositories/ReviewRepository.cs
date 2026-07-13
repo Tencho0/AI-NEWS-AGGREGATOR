@@ -495,10 +495,10 @@ public sealed class ReviewRepository(IDbConnectionFactory db, IConfiguration con
             SELECT TOP (@max) t.Id, t.Label, t.Score, t.Status,
                    (SELECT COUNT(*) FROM dbo.nw_TopicArticle ta WHERE ta.TopicId = t.Id) AS Articles
             FROM dbo.nw_Topic t
-            WHERE t.Status <> @doneStatus
+            WHERE t.Status NOT IN (@doneStatus, @manualStatus)
             ORDER BY t.Score DESC, t.Id
             """,
-            new { max, doneStatus = nameof(TopicStatus.Done) })).ToList();
+            new { max, doneStatus = nameof(TopicStatus.Done), manualStatus = nameof(TopicStatus.Manual) })).ToList();
 
         if (topics.Count == 0)
             return "Няма отворени теми.";

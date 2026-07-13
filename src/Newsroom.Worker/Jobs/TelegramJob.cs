@@ -36,6 +36,8 @@ public sealed class TelegramJob(
         "/quota — изразходвана AI квота днес\n" +
         "/health — състояние на задачите\n" +
         "/draft <номер> — пусни тема за чернова\n" +
+        "/post <заглавие и текст> — публикувай статия точно както е написана\n" +
+        "/new <бележки> — AI пише статия от твоя текст\n" +
         "/mute <номер> [часове] — заглуши тема (по подразбиране 24 ч.)\n" +
         "/unmute <номер> — отзаглуши тема\n" +
         "/pause — спри генерирането на чернови\n" +
@@ -451,6 +453,21 @@ public sealed class TelegramJob(
                     logger.LogInformation("Topic {TopicId} force-drafted by {User} via /draft",
                         force.TopicId, text.UserName ?? text.UserId.ToString());
                 await SendTextAsync(text.ChatId, ForceDraftReply(force.TopicId, forceResult), ct);
+                break;
+
+            case CreateArticle create:
+                var manualDraftId = await drafts.CreateManualArticleAsync(create.Headline, create.Body, ct);
+                logger.LogInformation("Editor article draft {DraftId} created by {User} via /post",
+                    manualDraftId, text.UserName ?? text.UserId.ToString());
+                await SendTextAsync(text.ChatId, "📝 Статията е приета — картичката за преглед идва.", ct);
+                break;
+
+            case CreateAiArticle createAi:
+                var manualTopicId = await drafts.CreateManualTopicAsync(createAi.Text, ct);
+                logger.LogInformation("Manual topic {TopicId} queued for AI drafting by {User} via /new",
+                    manualTopicId, text.UserName ?? text.UserId.ToString());
+                await SendTextAsync(text.ChatId,
+                    $"✍️ Статията се пише (тема #{manualTopicId}) — ще я получиш за преглед.", ct);
                 break;
 
             case Ignore:
