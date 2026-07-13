@@ -4,7 +4,10 @@ using System.Text.Json;
 
 using Dapper;
 
+using Microsoft.Extensions.Configuration;
+
 using Newsroom.Core.Drafting;
+using Newsroom.Core.Operations;
 using Newsroom.Core.Review;
 using Newsroom.Core.Scraping;
 using Newsroom.Core.Trends;
@@ -18,7 +21,7 @@ namespace Newsroom.Infrastructure.Repositories;
 /// false, and every successful transition writes its nw_ReviewAction row in the same
 /// transaction (docs/05-integrations/telegram.md interaction rules).
 /// </summary>
-public sealed class ReviewRepository(IDbConnectionFactory db) : IReviewRepository
+public sealed class ReviewRepository(IDbConnectionFactory db, IConfiguration configuration) : IReviewRepository
 {
     private const string UpdateOffsetKey = "Telegram:UpdateOffset";
     private const string ChangeInstructionsKind = "ChangeInstructions";
@@ -508,6 +511,7 @@ public sealed class ReviewRepository(IDbConnectionFactory db) : IReviewRepositor
                 .Append(" (").Append(topic.Status).Append(", ").Append(topic.Articles)
                 .Append(topic.Articles == 1 ? " статия)" : " статии)");
         }
+        summary.Append("\n\nЗа чернова: /draft <номер>");
         return summary.ToString();
     }
 
@@ -521,6 +525,21 @@ public sealed class ReviewRepository(IDbConnectionFactory db) : IReviewRepositor
             WHERE Id = @topicId
             """,
             new { topicId, hours });
+        return rows > 0;
+    }
+
+    /// <summary>Returns true even if the topic was not muted (the id exists) — the reply
+    /// ("вече не е заглушена") is true either way; only an unknown id returns false.</summary>
+    public async Task<bool> UnmuteTopicAsync(int topicId, CancellationToken ct)
+    {
+        using var connection = await db.OpenAsync(ct);
+        var rows = await connection.ExecuteAsync(
+            """
+            UPDATE dbo.nw_Topic
+            SET MutedUntilUtc = NULL
+            WHERE Id = @topicId
+            """,
+            new { topicId });
         return rows > 0;
     }
 
@@ -546,6 +565,72 @@ public sealed class ReviewRepository(IDbConnectionFactory db) : IReviewRepositor
             """,
             new { key });
         return bool.TryParse(value, out var flag) ? flag : defaultValue;
+    }
+
+    public async Task<string> BuildQuotaSummaryAsync(CancellationToken ct)
+    {
+        var todayUtc = DateTime.UtcNow.Date;
+
+        using var connection = await db.OpenAsync(ct);
+        var usedRows = await connection.QueryAsync<(string Stage, int Used)>(
+            """
+            SELECT Stage, SUM(RequestCount) AS Used
+            FROM dbo.nw_CostLedger
+            WHERE AtUtc >= @todayUtc
+            GROUP BY Stage
+            """,
+            new { todayUtc });
+        var used = usedRows.ToDictionary(r => r.Stage, r => r.Used, StringComparer.OrdinalIgnoreCase);
+
+        // Show the union of configured stages (cap known, maybe 0 used) and stages actually seen
+        // in today's ledger (so an unconfigured-but-used stage is not hidden). Cap defaults to the
+        // same 1000 AiBudget uses when a stage has no explicit DailyRequestBudget.
+        var configuredStages = configuration.GetSection("Ai:Stages").GetChildren().Select(c => c.Key);
+        var stageNames = configuredStages
+            .Concat(used.Keys)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var stages = stageNames
+            .Select(stage => (
+                Stage: stage,
+                Used: used.GetValueOrDefault(stage, 0),
+                Cap: configuration.GetValue($"Ai:Stages:{stage}:DailyRequestBudget", 1000)))
+            .ToList();
+
+        return FormatQuotaSummary(stages);
+    }
+
+    public async Task<string> BuildHealthSummaryAsync(CancellationToken ct)
+    {
+        var staleMinutes = configuration.GetValue("Ops:Health:StaleMinutes", 15);
+        string[] jobNames =
+        [
+            JobNames.Scrape, JobNames.Analyse, JobNames.Trend,
+            JobNames.Draft, JobNames.Telegram, JobNames.Publish,
+        ];
+        var keys = jobNames.Select(j => JobHeartbeat.KeyPrefix + j).ToArray();
+
+        using var connection = await db.OpenAsync(ct);
+        var rows = await connection.QueryAsync<(string Key, string Value)>(
+            """
+            SELECT [Key], [Value] FROM dbo.nw_Config WHERE [Key] IN @keys
+            """,
+            new { keys });
+        var beats = rows.ToDictionary(r => r.Key, r => r.Value, StringComparer.Ordinal);
+
+        var jobs = jobNames
+            .Select(job => (
+                Job: job,
+                LastBeatUtc: beats.TryGetValue(JobHeartbeat.KeyPrefix + job, out var v)
+                    && DateTime.TryParse(v, CultureInfo.InvariantCulture,
+                        DateTimeStyles.RoundtripKind, out var parsed)
+                    ? parsed
+                    : (DateTime?)null))
+            .ToList();
+
+        return FormatHealthSummary(jobs, DateTime.UtcNow, staleMinutes);
     }
 
     /// <summary>Bulgarian /quota body: one line per AI stage, "used/cap", ⚠️ when at/over cap.</summary>

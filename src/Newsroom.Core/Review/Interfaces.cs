@@ -146,6 +146,15 @@ public interface IReviewRepository
     /// <summary>Mutes the topic for <paramref name="hours"/>. False when the topic id is unknown.</summary>
     Task<bool> MuteTopicAsync(int topicId, int hours, CancellationToken ct);
 
+    /// <summary>Bulgarian /quota summary: AI requests used today vs the per-stage daily cap.</summary>
+    Task<string> BuildQuotaSummaryAsync(CancellationToken ct);
+
+    /// <summary>Bulgarian /health summary: last heartbeat per background job with a staleness flag.</summary>
+    Task<string> BuildHealthSummaryAsync(CancellationToken ct);
+
+    /// <summary>Lifts a topic's mute early. False when the topic id is unknown.</summary>
+    Task<bool> UnmuteTopicAsync(int topicId, CancellationToken ct);
+
     /// <summary>Editor-controlled runtime switches in nw_Config, e.g. 'Draft:Paused'.</summary>
     Task SetRuntimeFlagAsync(string key, string value, CancellationToken ct);
 
