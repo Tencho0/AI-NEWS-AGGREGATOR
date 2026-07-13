@@ -63,9 +63,14 @@ each command's response is in [`TelegramJob`](../../src/Newsroom.Worker/Jobs/Tel
 |---|---|
 | `/status` | Posts a status summary of the worker (queue/draft state). |
 | `/topics` | Lists the top tracked topics. |
+| `/quota` | AI requests used vs the daily per-stage cap today. |
+| `/health` | Last heartbeat per background job, with a staleness marker. |
+| `/help` | Prints the command list. |
 | `/mute <topicId> [hours]` | Silences one topic. `hours` is optional and **defaults to 24**; e.g. `/mute 42` or `/mute 42 6`. Replies with confirmation or "няма такава тема" if the id is unknown. |
+| `/unmute <topicId>` | Lifts a topic mute early (reverse of `/mute`). |
 | `/pause` | Stops **draft generation** (runtime flag `Draft:Paused` in `nw_Config`). Scraping and analysis keep running. |
 | `/resume` | Clears the pause flag — draft generation resumes on the next DraftJob cycle. |
+| `/draft <topicId>` | Force-draft a topic even if it is not Hot. |
 
 In group chats the `@BotName` suffix (`/status@MyBot`) is accepted and stripped.
 
@@ -83,7 +88,7 @@ replies to the review card:
 | Submit instructions | Text reply to a review card | Binds the words to that card's draft as change instructions (unambiguous even with several drafts waiting). |
 | Attach photo | Photo reply to a review card | Stores the upload as `editor-upload`; it wins image selection. |
 
-There is **no `/help` or `/start`** — unrecognised text is silently ignored. `/draft <url>`
+There is **no `/start`** — unrecognised text is silently ignored. `/draft <url>`
 is a planned Phase 4b command and is **not routed yet**.
 
 ## Implementation notes (v1 — Phase 4a)
