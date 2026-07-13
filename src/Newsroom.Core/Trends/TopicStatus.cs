@@ -10,5 +10,8 @@ public enum TopicStatus
     Emerging,
     Hot,
     Muted,
-    Done
+    Done,
+    /// <summary>Editor-authored (/post, /new): synthetic topic, invisible to trend scoring
+    /// and /topics; nw_Topic.EditorInput carries the editor's text.</summary>
+    Manual
 }
