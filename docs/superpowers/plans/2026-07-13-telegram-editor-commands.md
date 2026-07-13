@@ -850,3 +850,190 @@ From the review chat, confirm:
 git add -A
 git commit -m "chore(telegram): verification fixes for editor commands"
 ```
+
+---
+
+### Task 9: Reconcile `/health` with the WatchdogJob per-job thresholds (post-review fix)
+
+**Why:** The final review found `/health` used a flat 15-min staleness threshold while `WatchdogJob` already pages on per-job allowances (3× each job's interval). `/health` could show a dead fast job (Scrape ~3 min) as healthy for up to 15 min — false reassurance from the diagnostic command. Fix: extract the watchdog's per-job allowance table into a shared helper both consume, and make `/health` flag a job stale when its beat exceeds that job's allowance.
+
+**Files:**
+- Create: `src/Newsroom.Infrastructure/Operations/JobStalenessPolicy.cs`
+- Modify: `src/Newsroom.Worker/Jobs/WatchdogJob.cs` (use the shared helper; drop its private `BuildExpectations`/`Allowance`)
+- Modify: `src/Newsroom.Infrastructure/Repositories/ReviewRepository.cs` (`FormatHealthSummary` new signature; `BuildHealthSummaryAsync` uses per-job allowances)
+- Test: `src/tests/Newsroom.Infrastructure.Tests/Repositories/ReviewRepositoryTests.cs` (update the `FormatHealthSummary` test)
+
+**Interfaces:**
+- Produces: `JobStalenessPolicy.BuildExpectations(IConfiguration) : IReadOnlyList<(string JobName, TimeSpan Allowance)>`; `FormatHealthSummary(IReadOnlyList<(string Job, DateTime? LastBeatUtc, TimeSpan Allowance)>, DateTime nowUtc) : string`.
+- Consumes: existing `JobNames`, `TelegramOptions.From`, `UmbracoOptions.From`, `JobHeartbeat.KeyPrefix`.
+
+- [ ] **Step 1: Update the failing test first (TDD)**
+
+Replace the existing `FormatHealthSummary_reports_age_and_flags_stale_jobs` test in `ReviewRepositoryTests.cs` with the new per-job-allowance version:
+
+```csharp
+    [Fact]
+    public void FormatHealthSummary_reports_age_and_flags_jobs_past_their_allowance()
+    {
+        var now = new DateTime(2026, 7, 13, 12, 0, 0, DateTimeKind.Utc);
+        var text = ReviewRepository.FormatHealthSummary(
+        [
+            ("Scrape", now.AddMinutes(-2), TimeSpan.FromMinutes(3)),    // fresh (2 < 3)
+            ("Analyse", now.AddMinutes(-6), TimeSpan.FromMinutes(6)),   // exactly at allowance → not stale
+            ("Draft", now.AddMinutes(-40), TimeSpan.FromMinutes(15)),   // stale (40 > 15)
+            ("Publish", null, TimeSpan.FromMinutes(3)),                 // never beaten
+        ], now);
+
+        Assert.Contains("Scrape: преди 2 мин", text);
+        Assert.DoesNotContain("преди 2 мин ⚠️", text);   // fresh job not flagged
+        Assert.Contains("Analyse: преди 6 мин", text);
+        Assert.DoesNotContain("преди 6 мин ⚠️", text);   // boundary: age == allowance is not stale
+        Assert.Contains("Draft: преди 40 мин ⚠️ закъснява", text);
+        Assert.Contains("Publish: няма", text);
+    }
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `dotnet test src/tests/Newsroom.Infrastructure.Tests/Newsroom.Infrastructure.Tests.csproj --filter "FullyQualifiedName~FormatHealthSummary"`
+Expected: FAIL to compile — `FormatHealthSummary`'s current signature takes `(…, DateTime, int staleMinutes)`, not the 3-tuple + `nowUtc` form.
+
+- [ ] **Step 3: Create the shared policy**
+
+Create `src/Newsroom.Infrastructure/Operations/JobStalenessPolicy.cs`:
+
+```csharp
+using Microsoft.Extensions.Configuration;
+
+using Newsroom.Core.Operations;
+using Newsroom.Infrastructure.Publishing;
+using Newsroom.Infrastructure.Review;
+
+namespace Newsroom.Infrastructure.Operations;
+
+/// <summary>
+/// Per-job heartbeat allowance = 3× the interval each job configures itself with
+/// (docs/07-operations.md). Shared by <c>WatchdogJob</c> (which pages when a beat exceeds its
+/// allowance) and the <c>/health</c> command (which shows the same staleness view), so the
+/// diagnostic and the pager can never disagree. Telegram and Publish are listed only when
+/// configured — unconfigured jobs stay dormant and must not read as stale.
+/// </summary>
+public static class JobStalenessPolicy
+{
+    public static IReadOnlyList<(string JobName, TimeSpan Allowance)> BuildExpectations(
+        IConfiguration configuration)
+    {
+        var expectations = new List<(string, TimeSpan)>
+        {
+            (JobNames.Scrape, Allowance(configuration, "Scrape:CheckSeconds", 60)),
+            (JobNames.Analyse, Allowance(configuration, "Ai:Stages:Analyse:CheckSeconds", 120)),
+            (JobNames.Trend, Allowance(configuration, "Ai:Stages:Cluster:CheckSeconds", 300)),
+            (JobNames.Draft, Allowance(configuration, "Ai:Stages:Draft:CheckSeconds", 300)),
+        };
+
+        var telegram = TelegramOptions.From(configuration);
+        if (telegram.IsConfigured)
+            expectations.Add((JobNames.Telegram,
+                TimeSpan.FromSeconds(3 * telegram.PollTimeoutSeconds + 60)));
+
+        var umbraco = UmbracoOptions.From(configuration);
+        if (umbraco.IsConfigured)
+            expectations.Add((JobNames.Publish, TimeSpan.FromSeconds(3 * umbraco.CheckSeconds)));
+
+        return expectations;
+    }
+
+    private static TimeSpan Allowance(IConfiguration configuration, string intervalKey, int defaultSeconds) =>
+        TimeSpan.FromSeconds(3 * configuration.GetValue(intervalKey, defaultSeconds));
+}
+```
+
+- [ ] **Step 4: Point `WatchdogJob` at the shared helper**
+
+In `WatchdogJob.cs`: add `using Newsroom.Infrastructure.Operations;`. Change the loop header from `foreach (var (jobName, allowedStaleness) in BuildExpectations())` to:
+
+```csharp
+        foreach (var (jobName, allowedStaleness) in JobStalenessPolicy.BuildExpectations(configuration))
+```
+
+Then delete the now-unused private `BuildExpectations()` method (and its XML doc comment) and the private `Allowance(...)` method — their logic now lives in `JobStalenessPolicy`. Leave the rest of `WatchdogJob` (the `WatchdogPolicy.ShouldAlert` call, alerting, rate limiting) unchanged.
+
+- [ ] **Step 5: Rewrite `FormatHealthSummary` to take a per-job allowance**
+
+In `ReviewRepository.cs`, replace the whole `FormatHealthSummary` method (signature + doc + body) with:
+
+```csharp
+    /// <summary>Bulgarian /health body: one line per job, minutes since its last heartbeat,
+    /// ⚠️ закъснява when the beat is older than that job's allowance, няма when never seen.</summary>
+    public static string FormatHealthSummary(
+        IReadOnlyList<(string Job, DateTime? LastBeatUtc, TimeSpan Allowance)> jobs, DateTime nowUtc)
+    {
+        var summary = new StringBuilder();
+        summary.Append("🩺 Състояние на задачите");
+        foreach (var (job, lastBeat, allowance) in jobs)
+        {
+            summary.Append('\n').Append(job).Append(": ");
+            if (lastBeat is not { } beat)
+            {
+                summary.Append("няма");
+                continue;
+            }
+
+            var age = nowUtc - beat;
+            var minutes = (int)Math.Max(0, age.TotalMinutes);
+            summary.Append("преди ").Append(minutes).Append(" мин");
+            if (age > allowance)
+                summary.Append(" ⚠️ закъснява");
+        }
+        return summary.ToString();
+    }
+```
+
+- [ ] **Step 6: Rewrite `BuildHealthSummaryAsync` to use the shared expectations**
+
+In `ReviewRepository.cs`, add `using Newsroom.Infrastructure.Operations;` (with the other usings) and replace the whole `BuildHealthSummaryAsync` method body with:
+
+```csharp
+    public async Task<string> BuildHealthSummaryAsync(CancellationToken ct)
+    {
+        var expectations = JobStalenessPolicy.BuildExpectations(configuration);
+        var keys = expectations.Select(e => JobHeartbeat.KeyPrefix + e.JobName).ToArray();
+
+        using var connection = await db.OpenAsync(ct);
+        var rows = await connection.QueryAsync<(string Key, string Value)>(
+            """
+            SELECT [Key], [Value] FROM dbo.nw_Config WHERE [Key] IN @keys
+            """,
+            new { keys });
+        var beats = rows.ToDictionary(r => r.Key, r => r.Value, StringComparer.Ordinal);
+
+        var jobs = expectations
+            .Select(e => (
+                Job: e.JobName,
+                LastBeatUtc: beats.TryGetValue(JobHeartbeat.KeyPrefix + e.JobName, out var v)
+                    && DateTime.TryParse(v, CultureInfo.InvariantCulture,
+                        DateTimeStyles.RoundtripKind, out var parsed)
+                    ? parsed
+                    : (DateTime?)null,
+                e.Allowance))
+            .ToList();
+
+        return FormatHealthSummary(jobs, DateTime.UtcNow);
+    }
+```
+
+This drops the `Ops:Health:StaleMinutes` config read entirely — `/health` now shows exactly the jobs the watchdog watches, each flagged against the watchdog's own allowance.
+
+- [ ] **Step 7: Verify — tests, Infrastructure build, Worker compile**
+
+- `dotnet test src/tests/Newsroom.Infrastructure.Tests/Newsroom.Infrastructure.Tests.csproj --filter "FullyQualifiedName~ReviewRepositoryTests"` → PASS (the updated FormatHealthSummary test + the quota tests).
+- `dotnet build src/Newsroom.Infrastructure/Newsroom.Infrastructure.csproj` → 0 errors.
+- `dotnet build src/Newsroom.Worker/Newsroom.Worker.csproj` → **0 `CS####` errors** (MSB3027 DLL-copy-lock errors are the expected live-worker condition and are acceptable).
+- `dotnet test src/tests/Newsroom.Core.Tests/Newsroom.Core.Tests.csproj` → PASS (confirms the WatchdogJob-adjacent `WatchdogPolicy` tests still pass).
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add src/Newsroom.Infrastructure/Operations/JobStalenessPolicy.cs src/Newsroom.Worker/Jobs/WatchdogJob.cs src/Newsroom.Infrastructure/Repositories/ReviewRepository.cs "src/tests/Newsroom.Infrastructure.Tests/Repositories/ReviewRepositoryTests.cs"
+git commit -m "fix(health): share WatchdogJob per-job thresholds with /health"
+```
