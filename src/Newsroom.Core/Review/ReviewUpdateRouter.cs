@@ -76,7 +76,12 @@ public static class ReviewUpdateRouter
         if ((draftIdFromReply ?? pendingDraftId) is { } draftId && !text.StartsWith('/'))
             return new SubmitChangeInstructions(draftId, text);
 
-        var parts = text.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        // Whitespace split (not just spaces): a newline right after the command token is how
+        // multi-line /post and /new arrive. Behaviour-preserving for the id-based commands.
+        var parts = text.Split(default(char[]), StringSplitOptions.RemoveEmptyEntries);
+        // Free-text argument for /post и /new: everything after the command token, line breaks
+        // preserved (parts would collapse them). text is trimmed, so it starts with parts[0].
+        var argument = text[parts[0].Length..].Trim();
         return CommandName(parts[0]) switch
         {
             "/status" => new ShowStatus(),
@@ -87,6 +92,8 @@ public static class ReviewUpdateRouter
             "/mute" => RouteMute(parts),
             "/unmute" => RouteUnmute(parts),
             "/draft" => RouteForceDraft(parts),
+            "/post" => RoutePost(argument),
+            "/new" => argument.Length == 0 ? new Ignore(ReasonBadArguments) : new CreateAiArticle(NormalizeNewlines(argument)),
             "/pause" => new PauseDrafting(),
             "/resume" => new ResumeDrafting(),
             _ => new Ignore(ReasonUnknownText),
@@ -134,4 +141,21 @@ public static class ReviewUpdateRouter
             return new Ignore(ReasonBadArguments);
         return new ForceDraftTopic(topicId);
     }
+
+    /// <summary>/post: the first line of the argument is the headline, the remainder the body
+    /// (the argument is trimmed, so the first line is never empty).</summary>
+    private static ReviewCommand RoutePost(string argument)
+    {
+        if (argument.Length == 0)
+            return new Ignore(ReasonBadArguments);
+
+        var normalized = NormalizeNewlines(argument);
+        var newline = normalized.IndexOf('\n', StringComparison.Ordinal);
+        return newline < 0
+            ? new CreateArticle(normalized, "")
+            : new CreateArticle(normalized[..newline].TrimEnd(), normalized[(newline + 1)..].Trim());
+    }
+
+    private static string NormalizeNewlines(string text) =>
+        text.Replace("\r\n", "\n").Replace('\r', '\n');
 }

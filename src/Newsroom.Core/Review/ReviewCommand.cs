@@ -46,6 +46,14 @@ public sealed record UnmuteTopic(int TopicId) : ReviewCommand;
 /// <summary>/draft &lt;topicId&gt;: force-draft a topic even if it is not Hot (docs/05).</summary>
 public sealed record ForceDraftTopic(int TopicId) : ReviewCommand;
 
+/// <summary>/post: verbatim editor article — first line is the headline, the rest the body.
+/// Publishes exactly as sent, no AI (docs/05-integrations/telegram.md).</summary>
+public sealed record CreateArticle(string Headline, string Body) : ReviewCommand;
+
+/// <summary>/new: the editor's notes become raw material for an AI-written article
+/// (Manual topic + ForceDraft pickup — docs/05-integrations/telegram.md).</summary>
+public sealed record CreateAiArticle(string Text) : ReviewCommand;
+
 /// <summary>Do nothing. <paramref name="Reason"/> is one of the <see cref="ReviewUpdateRouter"/>
 /// reason constants; only <see cref="ReviewUpdateRouter.ReasonNotAllowlisted"/> callbacks get a
 /// "no rights" toast, everything else is silent (docs/05: unknown chats/users are ignored).</summary>

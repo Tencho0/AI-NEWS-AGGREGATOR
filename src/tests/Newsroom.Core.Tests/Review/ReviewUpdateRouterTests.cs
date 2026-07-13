@@ -275,4 +275,59 @@ public class ReviewUpdateRouterTests
 
         Assert.Equal(new Ignore(ReviewUpdateRouter.ReasonUnknownText), command);
     }
+
+    [Fact]
+    public void Post_splits_headline_and_body()
+    {
+        Assert.Equal(
+            new CreateArticle("Заглавие", "Първи ред.\nВтори ред."),
+            RouteText(Text("/post Заглавие\nПърви ред.\nВтори ред.")));
+    }
+
+    [Fact]
+    public void Post_headline_may_start_on_the_next_line()
+    {
+        Assert.Equal(
+            new CreateArticle("Заглавие", "Тялото на статията."),
+            RouteText(Text("/post\nЗаглавие\nТялото на статията.")));
+    }
+
+    [Fact]
+    public void Post_single_line_is_headline_only()
+    {
+        Assert.Equal(new CreateArticle("Само заглавие", ""), RouteText(Text("/post Само заглавие")));
+    }
+
+    [Fact]
+    public void Post_normalizes_windows_line_endings()
+    {
+        Assert.Equal(
+            new CreateArticle("Заглавие", "Тяло."),
+            RouteText(Text("/post Заглавие\r\nТяло.")));
+    }
+
+    [Fact]
+    public void New_keeps_line_breaks_in_the_editor_text()
+    {
+        Assert.Equal(
+            new CreateAiArticle("бележка ред 1\nбележка ред 2"),
+            RouteText(Text("/new бележка ред 1\nбележка ред 2")));
+    }
+
+    [Fact]
+    public void Post_and_new_route_with_botname_suffix()
+    {
+        Assert.Equal(new CreateArticle("Заглавие", ""), RouteText(Text("/post@MyBot Заглавие")));
+        Assert.Equal(new CreateAiArticle("бележки"), RouteText(Text("/new@MyBot бележки")));
+    }
+
+    [Theory]
+    [InlineData("/post")]
+    [InlineData("/post   ")]
+    [InlineData("/new")]
+    [InlineData("/new \n ")]
+    public void Post_and_new_without_text_are_ignored(string text)
+    {
+        Assert.Equal(new Ignore(ReviewUpdateRouter.ReasonBadArguments), RouteText(Text(text)));
+    }
 }
