@@ -208,8 +208,59 @@ public class ReviewUpdateRouterTests
     }
 
     [Theory]
+    [InlineData("/help")]
+    [InlineData("/HELP")]
+    [InlineData("/help@PredelNewsBot")]
+    public void Help_command_routes(string text)
+    {
+        Assert.Equal(new ShowHelp(), RouteText(Text(text)));
+    }
+
+    [Fact]
+    public void Quota_and_health_commands_route()
+    {
+        Assert.Equal(new ShowQuota(), RouteText(Text("/quota")));
+        Assert.Equal(new ShowHealth(), RouteText(Text("/health")));
+    }
+
+    [Fact]
+    public void Unmute_parses_topic_id()
+    {
+        Assert.Equal(new UnmuteTopic(12), RouteText(Text("/unmute 12")));
+        Assert.Equal(new UnmuteTopic(7), RouteText(Text("/unmute   7  "))); // tolerant spacing
+    }
+
+    [Theory]
+    [InlineData("/unmute")]
+    [InlineData("/unmute abc")]
+    [InlineData("/unmute 0")]
+    [InlineData("/unmute -3")]
+    [InlineData("/unmute 12 extra")]
+    public void Unmute_with_bad_arguments_is_ignored(string text)
+    {
+        Assert.Equal(new Ignore(ReviewUpdateRouter.ReasonBadArguments), RouteText(Text(text)));
+    }
+
+    [Fact]
+    public void Draft_parses_topic_id()
+    {
+        Assert.Equal(new ForceDraftTopic(42), RouteText(Text("/draft 42")));
+        Assert.Equal(new ForceDraftTopic(5), RouteText(Text("/draft   5  ")));
+    }
+
+    [Theory]
+    [InlineData("/draft")]
+    [InlineData("/draft 0")]
+    [InlineData("/draft -1")]
+    [InlineData("/draft https://example.com")] // URL form is Phase 4b — a non-numeric arg is bad args
+    [InlineData("/draft 42 extra")]
+    public void Draft_with_bad_arguments_is_ignored(string text)
+    {
+        Assert.Equal(new Ignore(ReviewUpdateRouter.ReasonBadArguments), RouteText(Text(text)));
+    }
+
+    [Theory]
     [InlineData("здравей")]
-    [InlineData("/draft https://example.com")] // Phase 4b command — not routed yet
     [InlineData("/unknown")]
     [InlineData("   ")]
     public void Plain_chatter_and_unknown_commands_are_ignored(string text)

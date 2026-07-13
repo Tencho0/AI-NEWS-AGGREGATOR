@@ -34,6 +34,18 @@ public sealed record PauseDrafting : ReviewCommand;
 
 public sealed record ResumeDrafting : ReviewCommand;
 
+public sealed record ShowHelp : ReviewCommand;
+
+public sealed record ShowQuota : ReviewCommand;
+
+public sealed record ShowHealth : ReviewCommand;
+
+/// <summary>/unmute: lift a topic's mute early (reverse of <see cref="MuteTopic"/>).</summary>
+public sealed record UnmuteTopic(int TopicId) : ReviewCommand;
+
+/// <summary>/draft &lt;topicId&gt;: force-draft a topic even if it is not Hot (docs/05).</summary>
+public sealed record ForceDraftTopic(int TopicId) : ReviewCommand;
+
 /// <summary>Do nothing. <paramref name="Reason"/> is one of the <see cref="ReviewUpdateRouter"/>
 /// reason constants; only <see cref="ReviewUpdateRouter.ReasonNotAllowlisted"/> callbacks get a
 /// "no rights" toast, everything else is silent (docs/05: unknown chats/users are ignored).</summary>

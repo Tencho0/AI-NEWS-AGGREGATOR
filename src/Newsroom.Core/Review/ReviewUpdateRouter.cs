@@ -81,7 +81,12 @@ public static class ReviewUpdateRouter
         {
             "/status" => new ShowStatus(),
             "/topics" => new ShowTopics(),
+            "/help" => new ShowHelp(),
+            "/quota" => new ShowQuota(),
+            "/health" => new ShowHealth(),
             "/mute" => RouteMute(parts),
+            "/unmute" => RouteUnmute(parts),
+            "/draft" => RouteForceDraft(parts),
             "/pause" => new PauseDrafting(),
             "/resume" => new ResumeDrafting(),
             _ => new Ignore(ReasonUnknownText),
@@ -109,5 +114,24 @@ public static class ReviewUpdateRouter
             return new Ignore(ReasonBadArguments);
 
         return new MuteTopic(topicId, hours);
+    }
+
+    private static ReviewCommand RouteUnmute(string[] parts)
+    {
+        if (parts.Length != 2)
+            return new Ignore(ReasonBadArguments);
+        if (!int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var topicId) || topicId <= 0)
+            return new Ignore(ReasonBadArguments);
+        return new UnmuteTopic(topicId);
+    }
+
+    /// <summary>Only the numeric topic-id form is routed; a URL argument (Phase 4b) is bad args.</summary>
+    private static ReviewCommand RouteForceDraft(string[] parts)
+    {
+        if (parts.Length != 2)
+            return new Ignore(ReasonBadArguments);
+        if (!int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var topicId) || topicId <= 0)
+            return new Ignore(ReasonBadArguments);
+        return new ForceDraftTopic(topicId);
     }
 }
