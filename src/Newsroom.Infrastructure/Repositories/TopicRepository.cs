@@ -49,10 +49,10 @@ public sealed class TopicRepository(IDbConnectionFactory db) : ITopicRepository
                 FROM dbo.nw_TopicArticle ta
                 JOIN dbo.nw_SourceArticle a ON a.Id = ta.ArticleId
             ) recent ON recent.TopicId = t.Id AND recent.Recency <= @recentTitlesPerTopic
-            WHERE t.Status <> @doneStatus
+            WHERE t.Status NOT IN (@doneStatus, @manualStatus)
             ORDER BY t.Id, recent.Recency
             """,
-            new { recentTitlesPerTopic, doneStatus = nameof(TopicStatus.Done) });
+            new { recentTitlesPerTopic, doneStatus = nameof(TopicStatus.Done), manualStatus = nameof(TopicStatus.Manual) });
 
         return rows
             .GroupBy(r => (r.TopicId, r.Label))
@@ -107,10 +107,10 @@ public sealed class TopicRepository(IDbConnectionFactory db) : ITopicRepository
             var topicId = await connection.ExecuteScalarAsync<long?>(
                 """
                 SELECT TOP (1) Id FROM dbo.nw_Topic
-                WHERE Label = @label AND Status <> @doneStatus
+                WHERE Label = @label AND Status NOT IN (@doneStatus, @manualStatus)
                 ORDER BY Id
                 """,
-                new { label, doneStatus = nameof(TopicStatus.Done) },
+                new { label, doneStatus = nameof(TopicStatus.Done), manualStatus = nameof(TopicStatus.Manual) },
                 transaction);
             topicId ??= await connection.ExecuteScalarAsync<long>(
                 """
@@ -158,10 +158,10 @@ public sealed class TopicRepository(IDbConnectionFactory db) : ITopicRepository
             """
             SELECT CAST(Id AS bigint) AS TopicId, Label, Status, MutedUntilUtc
             FROM dbo.nw_Topic
-            WHERE Status <> @doneStatus
+            WHERE Status NOT IN (@doneStatus, @manualStatus)
             ORDER BY Id
             """,
-            new { doneStatus = nameof(TopicStatus.Done) });
+            new { doneStatus = nameof(TopicStatus.Done), manualStatus = nameof(TopicStatus.Manual) });
         return rows.ToList();
     }
 
