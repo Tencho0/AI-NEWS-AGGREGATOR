@@ -167,6 +167,20 @@ public class GeminiDraftingAiTests
     }
 
     [Fact]
+    public async Task Generate_with_empty_response_throws_AiEmptyResponseException()
+    {
+        // HTTP 200 with an empty completion (provider load): distinct from malformed JSON so
+        // DraftJob classifies it as transient instead of burning the topic's attempt budget.
+        var (client, _, _) = CreateClient("");
+
+        var ex = await Assert.ThrowsAsync<AiEmptyResponseException>(
+            () => client.GenerateAsync(Bundle(), null, CancellationToken.None));
+
+        Assert.Contains("empty completion", ex.Message);
+        Assert.Contains("draft", ex.Message);
+    }
+
+    [Fact]
     public async Task Generate_requires_a_non_empty_bundle()
     {
         var (client, _, _) = CreateClient(ValidDraftJson);
@@ -207,6 +221,18 @@ public class GeminiDraftingAiTests
 
         Assert.Contains("malformed JSON", ex.Message);
         Assert.Contains("looks fine to me", ex.Message);
+    }
+
+    [Fact]
+    public async Task SelfCheck_with_empty_response_throws_AiEmptyResponseException()
+    {
+        var (client, _, _) = CreateClient(ValidDraftJson, "");
+
+        var ex = await Assert.ThrowsAsync<AiEmptyResponseException>(
+            () => client.SelfCheckAsync(Draft(), Bundle(), CancellationToken.None));
+
+        Assert.Contains("empty completion", ex.Message);
+        Assert.Contains("self-check", ex.Message);
     }
 
     /// <summary>Canned-response IChatClient standing in for the Gemini adapter (the ADR-0010 seam).</summary>

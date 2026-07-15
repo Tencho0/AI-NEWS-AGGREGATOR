@@ -11,12 +11,14 @@ public class GeminiAiClientTests
         new(id, $"Заглавие {id}", text, "Тестов източник", new DateTime(2026, 7, 1));
 
     private static (GeminiAiClient Client, FakeChatClient Fake) CreateClient(
-        string responseText, UsageDetails? usage = null, GeminiAiOptions? options = null)
+        string responseText, UsageDetails? usage = null, GeminiAiOptions? options = null,
+        ChatFinishReason? finishReason = null)
     {
         var response = new ChatResponse(new ChatMessage(ChatRole.Assistant, responseText))
         {
             Usage = usage,
             ModelId = "gemini-2.5-flash",
+            FinishReason = finishReason,
         };
         var fake = new FakeChatClient(response);
         var client = new GeminiAiClient(fake, options ?? new GeminiAiOptions(),
@@ -119,6 +121,33 @@ public class GeminiAiClientTests
 
         Assert.Contains("malformed JSON", ex.Message);
         Assert.Contains("Sorry, I cannot analyse", ex.Message); // payload preview aids debugging
+    }
+
+    [Fact]
+    public async Task Empty_response_throws_AiEmptyResponseException_with_finish_reason()
+    {
+        // Observed under provider load: HTTP 200 with an empty completion (the 200-shaped sibling
+        // of the 503 "high demand" error). Must be distinguishable from malformed JSON so jobs
+        // classify it as transient instead of burning the batch's attempt budget.
+        var (client, _) = CreateClient("", finishReason: ChatFinishReason.ContentFilter);
+
+        var ex = await Assert.ThrowsAsync<AiEmptyResponseException>(
+            () => client.SummariseAndClassifyAsync([Article(1)], CancellationToken.None));
+
+        Assert.Contains("empty completion", ex.Message);
+        Assert.Equal("content_filter", ex.FinishReason); // diagnosable, e.g. a SAFETY block
+    }
+
+    [Fact]
+    public async Task Whitespace_only_response_counts_as_empty()
+    {
+        var (client, _) = CreateClient(" \n\t ");
+
+        var ex = await Assert.ThrowsAsync<AiEmptyResponseException>(
+            () => client.SummariseAndClassifyAsync([Article(1)], CancellationToken.None));
+
+        Assert.Null(ex.FinishReason);
+        Assert.Contains("unknown", ex.Message); // no finish reason supplied by the provider
     }
 
     [Fact]

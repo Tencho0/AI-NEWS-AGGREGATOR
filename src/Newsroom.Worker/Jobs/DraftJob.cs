@@ -118,9 +118,10 @@ public sealed class DraftJob(
             }
             catch (Exception ex) when (AiTransientErrors.IsTransient(ex))
             {
-                // Provider quota or transient overload, not this draft's fault: no attempt burned,
-                // retry next cycle once the quota window resets / capacity frees up (risk R-11).
-                logger.LogWarning("AI temporarily unavailable while drafting topic {TopicId}; will retry later", topicId);
+                // Provider quota, overload or an empty completion, not this draft's fault: no
+                // attempt burned, retry next cycle once capacity frees up (risk R-11).
+                logger.LogWarning("AI temporarily unavailable while drafting topic {TopicId}; will retry later: {Reason}",
+                    topicId, ex.Message);
                 return;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -160,8 +161,8 @@ public sealed class DraftJob(
             {
                 // Row stays Generating with its instructions; retried automatically next cycle
                 // once the quota window resets / capacity frees up.
-                logger.LogWarning("AI temporarily unavailable while regenerating draft {DraftId}; will retry later",
-                    regeneration.DraftId);
+                logger.LogWarning("AI temporarily unavailable while regenerating draft {DraftId}; will retry later: {Reason}",
+                    regeneration.DraftId, ex.Message);
                 return;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)

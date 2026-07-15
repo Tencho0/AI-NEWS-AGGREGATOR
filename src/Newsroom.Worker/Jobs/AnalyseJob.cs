@@ -104,10 +104,11 @@ public sealed class AnalyseJob(
         }
         catch (Exception ex) when (AiTransientErrors.IsTransient(ex))
         {
-            // Provider quota or transient overload, not these articles' fault: no attempt burned,
-            // retry next cycle once the quota window resets / capacity frees up (risk R-11).
-            logger.LogWarning("AI temporarily unavailable while analysing {Count} article(s); will retry later",
-                batchIds.Count);
+            // Provider quota, overload or an empty completion, not these articles' fault: no
+            // attempt burned, retry next cycle once capacity frees up (risk R-11). The reason
+            // carries the finish reason for empties, so a permanent block would be visible here.
+            logger.LogWarning("AI temporarily unavailable while analysing {Count} article(s); will retry later: {Reason}",
+                batchIds.Count, ex.Message);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

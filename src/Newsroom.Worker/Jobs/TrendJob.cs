@@ -106,6 +106,12 @@ public sealed class TrendJob(
             logger.LogInformation("Clustered {Count} article(s) into topics ({New} new topic(s))",
                 result.Assignments.Count, newTopics);
         }
+        catch (Exception ex) when (AiTransientErrors.IsTransient(ex))
+        {
+            // Provider quota, overload or an empty completion: routine, not an error — the
+            // candidates stay unassigned and the next cycle picks them up again.
+            logger.LogWarning("AI temporarily unavailable while clustering; will retry later: {Reason}", ex.Message);
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex, "Clustering step failed"); // scoring still runs on what we have

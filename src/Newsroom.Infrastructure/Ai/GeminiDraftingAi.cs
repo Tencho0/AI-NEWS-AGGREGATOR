@@ -48,7 +48,7 @@ public sealed class GeminiDraftingAi(
 
         var response = await draftChatClient.GetResponseAsync(messages, chatOptions, ct).ConfigureAwait(false);
 
-        var content = ParseDraft(response.Text);
+        var content = ParseDraft(AiResponseText.RequireCompletion(response, "draft"));
         return new DraftGenerationResult(content, UsageFrom(response, options.DraftModel));
     }
 
@@ -70,7 +70,7 @@ public sealed class GeminiDraftingAi(
 
         var response = await selfCheckChatClient.GetResponseAsync(messages, chatOptions, ct).ConfigureAwait(false);
 
-        var claims = ParseSelfCheck(response.Text);
+        var claims = ParseSelfCheck(AiResponseText.RequireCompletion(response, "self-check"));
         return new SelfCheckResult(claims, UsageFrom(response, options.SelfCheckModel));
     }
 

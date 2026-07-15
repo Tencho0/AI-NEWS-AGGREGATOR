@@ -45,7 +45,7 @@ public sealed class GeminiClusteringAi(
 
         var response = await chatClient.GetResponseAsync(messages, chatOptions, ct).ConfigureAwait(false);
 
-        var assignments = ParseAssignments(response.Text, candidates);
+        var assignments = ParseAssignments(AiResponseText.RequireCompletion(response, "clustering batch"), candidates);
         var tokensIn = (int)(response.Usage?.InputTokenCount ?? 0);
         var tokensOut = (int)(response.Usage?.OutputTokenCount ?? 0);
         var cost = ((tokensIn * options.InputPricePerMTok) + (tokensOut * options.OutputPricePerMTok)) / 1_000_000m;

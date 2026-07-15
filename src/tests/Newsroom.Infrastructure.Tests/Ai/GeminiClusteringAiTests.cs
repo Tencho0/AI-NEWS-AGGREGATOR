@@ -116,6 +116,20 @@ public class GeminiClusteringAiTests
         Assert.Contains("Sorry, I cannot cluster", ex.Message); // payload preview aids debugging
     }
 
+    [Fact]
+    public async Task Empty_response_throws_AiEmptyResponseException()
+    {
+        // HTTP 200 with an empty completion (provider load): distinct from malformed JSON so
+        // callers can classify it as transient.
+        var (client, _) = CreateClient("");
+
+        var ex = await Assert.ThrowsAsync<AiEmptyResponseException>(
+            () => client.AssignAsync([], [Candidate(1)], CancellationToken.None));
+
+        Assert.Contains("empty completion", ex.Message);
+        Assert.Contains("clustering batch", ex.Message);
+    }
+
     /// <summary>Canned-response IChatClient standing in for the Gemini adapter (the ADR-0010 seam).</summary>
     private sealed class FakeChatClient(ChatResponse response) : IChatClient
     {
