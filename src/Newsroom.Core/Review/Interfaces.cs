@@ -20,8 +20,14 @@ public interface ITelegramGateway
         string? scheduleButtonLabel, CancellationToken ct);
 
     /// <summary>Edits a previously sent message; <paramref name="removeButtons"/> drops the
-    /// inline keyboard (resolved drafts must not keep live buttons).</summary>
-    Task EditHtmlAsync(long chatId, long messageId, string html, bool removeButtons, CancellationToken ct);
+    /// inline keyboard (resolved drafts must not keep live buttons). When
+    /// <paramref name="approveNowDraftIdForButton"/> is set, the edited message keeps a single
+    /// „✅ Одобри веднага" button carrying <c>approve:{draftId}</c> — used by the 📅 flow so a
+    /// scheduled draft stays actionable; null = button-less resolved state, the previous
+    /// behavior.</summary>
+    Task EditHtmlAsync(
+        long chatId, long messageId, string html, bool removeButtons,
+        long? approveNowDraftIdForButton, CancellationToken ct);
 
     /// <summary>Short toast answering an inline-button press (must happen within ~10 s).</summary>
     Task AnswerCallbackAsync(string callbackId, string text, CancellationToken ct);

@@ -359,8 +359,10 @@ public sealed class TelegramJob(
 
         var slotText = FormatSlot(slotLocal);
         await AnswerBestEffortAsync(callback.CallbackId, $"📅 Насрочено за {slotText}", ct);
+        // Keep a single "approve now" button so ✅ on this card can still override the schedule
+        // (TryApproveAsync fails — already Approved — and falls through to TryUnscheduleAsync).
         await EditResolvedAsync(callback.ChatId, callback.MessageId, draftId,
-            $"📅 Насрочено за {slotText} от {editor}", ct);
+            $"📅 Насрочено за {slotText} от {editor}", ct, approveNowDraftId: draftId);
         logger.LogInformation("Draft {DraftId}: scheduled for {SlotLocal} by {Editor}",
             draftId, slotLocal, editor);
     }
@@ -545,21 +547,26 @@ public sealed class TelegramJob(
         {
             var html = ReviewMessageRenderer.RenderHtml(view)
                 + ReviewMessageRenderer.RenderResolvedSuffix("✏️ Заявени промени — нова версия се изготвя");
-            await gateway.Value.EditHtmlAsync(text.ChatId, messageId, html, removeButtons: true, ct);
+            await gateway.Value.EditHtmlAsync(text.ChatId, messageId, html, removeButtons: true,
+                approveNowDraftIdForButton: null, ct);
         }
         logger.LogInformation("Draft {DraftId}: changes requested by {User}",
             submit.DraftId, text.UserName ?? text.UserId.ToString());
     }
 
-    /// <summary>Re-renders the draft's card with a final-status suffix and drops the buttons.</summary>
+    /// <summary>Re-renders the draft's card with a final-status suffix and drops the buttons —
+    /// unless <paramref name="approveNowDraftId"/> is set (the 📅 confirmation edit), in which
+    /// case a single "✅ Одобри веднага" button stays so the schedule can still be overridden.</summary>
     private async Task EditResolvedAsync(
-        long chatId, long messageId, long draftId, string statusLine, CancellationToken ct)
+        long chatId, long messageId, long draftId, string statusLine, CancellationToken ct,
+        long? approveNowDraftId = null)
     {
         var view = await reviews.GetReviewViewAsync(draftId, ct);
         if (view is null)
             return;
         var html = ReviewMessageRenderer.RenderHtml(view) + ReviewMessageRenderer.RenderResolvedSuffix(statusLine);
-        await gateway.Value.EditHtmlAsync(chatId, messageId, html, removeButtons: true, ct);
+        await gateway.Value.EditHtmlAsync(chatId, messageId, html, removeButtons: true,
+            approveNowDraftIdForButton: approveNowDraftId, ct);
     }
 
     /// <summary>Plain Bulgarian text (repository summaries, confirmations) sent as escaped HTML.</summary>

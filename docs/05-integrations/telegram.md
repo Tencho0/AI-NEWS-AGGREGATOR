@@ -42,7 +42,8 @@ One message per draft version:
 ```
 + photo message with the top image suggestion (attribution in caption)
 + inline keyboard: ✅ Одобри · ✏️ Промени · 🖼 Друга снимка · ❌ Откажи
-+ second keyboard row: 📅 Насрочи {HH:mm} (present whenever a suggested slot could be computed)
++ second keyboard row: 📅 Насрочи {HH:mm} (always present; the label degrades to a bare
+  „📅 Насрочи" when the suggested slot could not be computed)
 
 Editor-authored drafts (`/post`, `/new`) render a different header: `✍️ <topic label>
 (редакторска)` instead of `🔥 … (score …, N източника)` — there is no trend score or scraped
@@ -68,9 +69,10 @@ skip the block.
   Confirmation edits the card to „📅 Насрочено за {дд.MM HH:mm} от {editor}“;
   `nw_ReviewAction.Action = 'Scheduled'` (comment = the UTC slot). If the slot cannot be computed
   (e.g. a bad `Facebook:Schedule` config), the press is a no-op and the editor gets a "Грешка —
-  опитай пак" toast. ✅ pressed on an already-scheduled draft publishes immediately instead of
-  honouring the slot (`Action = 'ScheduleOverridden'`) — one more guarded transition alongside
-  approve/reject/change-request.
+  опитай пак" toast. The scheduled card keeps a single **„✅ Одобри веднага“** button (the other
+  buttons are dropped) so the schedule stays overridable: pressing it publishes on the next cycle
+  instead of waiting for the slot (`Action = 'ScheduleOverridden'`) — one more guarded transition
+  alongside approve/reject/change-request, re-using the same ✅ callback data as the original card.
 - After approve/reject, the message is edited to show final state + (on publish) live links.
 - All state transitions via the bot are recorded in `nw_ReviewAction` (user id, action, time).
 

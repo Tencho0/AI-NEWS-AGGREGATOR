@@ -104,16 +104,19 @@ public sealed class TelegramGateway(string botToken) : ITelegramGateway
     }
 
     public async Task EditHtmlAsync(
-        long chatId, long messageId, string html, bool removeButtons, CancellationToken ct)
+        long chatId, long messageId, string html, bool removeButtons,
+        long? approveNowDraftIdForButton, CancellationToken ct)
     {
-        // Telegram drops the inline keyboard on editMessageText unless reply_markup is re-sent;
-        // Phase 4a only ever edits messages into their resolved (button-less) state.
+        // Telegram drops the inline keyboard on editMessageText unless reply_markup is re-sent.
+        // A scheduled draft's confirmation edit re-attaches a single "approve now" button (below)
+        // so TryUnscheduleAsync stays reachable; every other resolved state stays button-less.
         _ = removeButtons;
         await bot.EditMessageText(
             chatId,
             (int)messageId,
             html,
             parseMode: ParseMode.Html,
+            replyMarkup: ApproveNowKeyboard(approveNowDraftIdForButton),
             linkPreviewOptions: NoPreview,
             cancellationToken: ct);
     }
@@ -174,6 +177,17 @@ public sealed class TelegramGateway(string botToken) : ITelegramGateway
         draftId is { } id
             ? new InlineKeyboardMarkup([
                 [InlineKeyboardButton.WithCallbackData("🖼 Друга снимка", $"image:{id}")],
+            ])
+            : null;
+
+    /// <summary>The scheduled-card's single-button keyboard: ✅ Одобри веднага → "approve:{draftId}"
+    /// — the same callback data the initial review card's ✅ button uses, so TryApproveAsync
+    /// (fails: already Approved) falling through to TryUnscheduleAsync is the only wiring the
+    /// button needs.</summary>
+    private static InlineKeyboardMarkup? ApproveNowKeyboard(long? draftId) =>
+        draftId is { } id
+            ? new InlineKeyboardMarkup([
+                [InlineKeyboardButton.WithCallbackData("✅ Одобри веднага", $"approve:{id}")],
             ])
             : null;
 

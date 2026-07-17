@@ -336,7 +336,8 @@ public sealed class PublishJob(
                 var html = ReviewMessageRenderer.RenderHtml(view)
                     + ReviewMessageRenderer.RenderResolvedSuffix("🚀 Публикувано");
                 await gateway.Value.EditHtmlAsync(
-                    telegram.ReviewChatId, messageId, html, removeButtons: true, ct);
+                    telegram.ReviewChatId, messageId, html, removeButtons: true,
+                    approveNowDraftIdForButton: null, ct);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
