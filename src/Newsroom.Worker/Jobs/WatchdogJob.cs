@@ -94,7 +94,7 @@ public sealed class WatchdogJob(
                 telegram.ReviewChatId,
                 ReviewMessageRenderer.Escape(
                     $"⚠️ Задачата {jobName} не е отчела активност от {(int)age.TotalMinutes} мин"),
-                withReviewButtons: false, draftIdForButtons: null, ct);
+                withReviewButtons: false, draftIdForButtons: null, scheduleButtonLabel: null, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

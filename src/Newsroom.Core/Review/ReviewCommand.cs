@@ -20,6 +20,10 @@ public sealed record SubmitChangeInstructions(long DraftId, string Instructions)
 /// <summary>🖼 pressed on the draft's photo message: select and show the next stock suggestion.</summary>
 public sealed record CycleImage(long DraftId) : ReviewCommand;
 
+/// <summary>📅 pressed on a review card: approve the draft gated on the suggested publish slot
+/// (recomputed at press time — card labels go stale). ✅ stays the immediate path.</summary>
+public sealed record ScheduleDraft(long DraftId) : ReviewCommand;
+
 /// <summary>An editor photo uploaded as a reply to the draft's review card or photo message —
 /// it becomes an 'editor-upload' image and wins selection (docs/05-integrations/images.md).</summary>
 public sealed record AttachEditorPhoto(long DraftId, string FileId) : ReviewCommand;

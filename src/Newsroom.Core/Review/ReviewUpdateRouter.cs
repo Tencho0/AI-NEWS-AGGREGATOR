@@ -37,6 +37,7 @@ public static class ReviewUpdateRouter
             "reject" => new RejectDraft(draftId),
             "changes" => new RequestChanges(draftId),
             "image" => new CycleImage(draftId),
+            "schedule" => new ScheduleDraft(draftId),
             _ => new Ignore(ReasonUnknownData),
         };
     }

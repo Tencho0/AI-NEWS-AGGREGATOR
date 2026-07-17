@@ -1,7 +1,11 @@
+using System.Globalization;
+
 using Newsroom.Core.Drafting;
 using Newsroom.Core.Operations;
+using Newsroom.Core.Publishing;
 using Newsroom.Core.Review;
 using Newsroom.Infrastructure.Images;
+using Newsroom.Infrastructure.Publishing;
 using Newsroom.Infrastructure.Review;
 
 namespace Newsroom.Worker.Jobs;
@@ -43,7 +47,8 @@ public sealed class TelegramJob(
         "/pause — спри генерирането на чернови\n" +
         "/resume — възобнови генерирането\n" +
         "\n" +
-        "Върху картичка: ✅ одобри · ✏️ промени · 🖼 друга снимка · ❌ откажи. " +
+        "Върху картичка: ✅ одобри (веднага) · 📅 насрочи за предложения час · ✏️ промени · " +
+        "🖼 друга снимка · ❌ откажи. " +
         "Отговор с текст = инструкции за промяна; отговор със снимка = прикачи снимка.";
 
     /// <summary>Where editor photo uploads land (Images:EditorUploadDir; a relative value is
@@ -97,12 +102,13 @@ public sealed class TelegramJob(
     {
         await ReportFailedRegenerationsAsync(options, ct);
         var pending = await reviews.GetUnsentPendingReviewsAsync(options.MaxSendPerCycle, ct);
+        var scheduleLabel = pending.Count > 0 ? await BuildScheduleLabelAsync(ct) : null;
         foreach (var view in pending)
         {
             ct.ThrowIfCancellationRequested();
             var html = ReviewMessageRenderer.RenderHtml(view);
             var messageId = await gateway.Value.SendHtmlAsync(
-                options.ReviewChatId, html, withReviewButtons: true, view.DraftId, ct);
+                options.ReviewChatId, html, withReviewButtons: true, view.DraftId, scheduleLabel, ct);
             await reviews.SetTelegramMessageIdAsync(view.DraftId, messageId, ct);
             logger.LogInformation("📨 Draft {DraftId} v{Version} posted for review (message {MessageId})",
                 view.DraftId, view.Version, messageId);
@@ -153,7 +159,7 @@ public sealed class TelegramJob(
             var messageId = await gateway.Value.SendHtmlAsync(
                 options.ReviewChatId,
                 $"⚠️ Новата версия за „{label}“ не можа да бъде създадена: {reason}",
-                withReviewButtons: false, null, ct);
+                withReviewButtons: false, null, scheduleButtonLabel: null, ct);
             await reviews.SetTelegramMessageIdAsync(draftId, messageId, ct);
             logger.LogInformation("Reported failed regeneration for draft {DraftId}", draftId);
         }
@@ -242,8 +248,12 @@ public sealed class TelegramJob(
         switch (command)
         {
             case ApproveDraft approve:
-                await ResolveDraftAsync(callback, approve.DraftId,
-                    await reviews.TryApproveAsync(approve.DraftId, callback.UserId, callback.UserName, ct),
+                // TryApprove: the normal PendingReview → Approved path. TryUnschedule: ✅ on an
+                // already-📅-scheduled draft clears the gate — "now" beats the slot by design.
+                var transitioned =
+                    await reviews.TryApproveAsync(approve.DraftId, callback.UserId, callback.UserName, ct)
+                    || await reviews.TryUnscheduleAsync(approve.DraftId, callback.UserId, callback.UserName, ct);
+                await ResolveDraftAsync(callback, approve.DraftId, transitioned,
                     toast: "✅ Одобрено", statusLine: $"✅ Одобрено от {editor}", ct);
                 break;
 
@@ -259,6 +269,10 @@ public sealed class TelegramJob(
 
             case CycleImage cycle:
                 await CycleImageAsync(callback, cycle.DraftId, ct);
+                break;
+
+            case ScheduleDraft schedule:
+                await ScheduleDraftAsync(callback, schedule.DraftId, editor, ct);
                 break;
 
             case Ignore ignore:
@@ -316,6 +330,28 @@ public sealed class TelegramJob(
         await gateway.Value.AnswerCallbackAsync(callback.CallbackId, "✏️ Очаквам инструкции", ct);
         await SendTextAsync(callback.ChatId,
             $"✏️ Опиши промените за „{draft.Value.Headline}“ с отговор на това съобщение.", ct);
+    }
+
+    /// <summary>📅 pressed: recompute the slot (card labels go stale) and approve the draft
+    /// gated on it. The guarded transition keeps double-taps and resolved drafts harmless.</summary>
+    private async Task ScheduleDraftAsync(
+        TgCallback callback, long draftId, string editor, CancellationToken ct)
+    {
+        var slotLocal = await SuggestSlotAsync(ct);
+        var scheduled = await reviews.TryScheduleAsync(
+            draftId, slotLocal.ToUniversalTime(), callback.UserId, callback.UserName, ct);
+        if (!scheduled)
+        {
+            await AnswerBestEffortAsync(callback.CallbackId, "Вече обработено", ct);
+            return;
+        }
+
+        var slotText = FormatSlot(slotLocal);
+        await AnswerBestEffortAsync(callback.CallbackId, $"📅 Насрочено за {slotText}", ct);
+        await EditResolvedAsync(callback.ChatId, callback.MessageId, draftId,
+            $"📅 Насрочено за {slotText} от {editor}", ct);
+        logger.LogInformation("Draft {DraftId}: scheduled for {SlotLocal} by {Editor}",
+            draftId, slotLocal, editor);
     }
 
     /// <summary>🖼 pressed on the photo message the button lives on: the repository flips
@@ -518,11 +554,47 @@ public sealed class TelegramJob(
     /// <summary>Plain Bulgarian text (repository summaries, confirmations) sent as escaped HTML.</summary>
     private Task SendTextAsync(long chatId, string text, CancellationToken ct) =>
         gateway.Value.SendHtmlAsync(
-            chatId, ReviewMessageRenderer.Escape(text), withReviewButtons: false, draftIdForButtons: null, ct);
+            chatId, ReviewMessageRenderer.Escape(text), withReviewButtons: false, draftIdForButtons: null,
+            scheduleButtonLabel: null, ct);
 
     private static string ResolveEditorUploadDir(IConfiguration configuration)
     {
         var dir = ImagesOptions.From(configuration).EditorUploadDir;
         return Path.IsPathRooted(dir) ? dir : Path.Combine(AppContext.BaseDirectory, dir);
     }
+
+    /// <summary>Label for the 📅 button ("📅 Насрочи 17:30" / "…утре 08:15"). Advisory — the
+    /// slot is recomputed at press time. Best-effort: a failure falls back to a bare label.</summary>
+    private async Task<string> BuildScheduleLabelAsync(CancellationToken ct)
+    {
+        try
+        {
+            return $"📅 Насрочи {FormatSlot(await SuggestSlotAsync(ct))}";
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Could not compute the suggested publish slot for the card button");
+            return "📅 Насрочи";
+        }
+    }
+
+    /// <summary>The suggested publish slot in LOCAL time (Digest:LocalTime convention):
+    /// commitments = Facebook posts since yesterday (gap + per-day caps) plus every pending
+    /// scheduled draft, fed to the pure suggester.</summary>
+    private async Task<DateTime> SuggestSlotAsync(CancellationToken ct)
+    {
+        var slotOptions = FacebookScheduleOptions.From(configuration).ToSlotOptions();
+        var fromUtc = DateTime.UtcNow.Date.AddDays(-1);
+        var commitments = (await reviews.GetFacebookCommitmentsUtcAsync(fromUtc, ct))
+            .Select(c => c.ToLocalTime())
+            .ToList();
+        return PublishSlotSuggester.Suggest(DateTime.Now, slotOptions, commitments);
+    }
+
+    private static string FormatSlot(DateTime slotLocal) =>
+        slotLocal.Date == DateTime.Now.Date
+            ? slotLocal.ToString("HH:mm", CultureInfo.InvariantCulture)
+            : slotLocal.Date == DateTime.Now.Date.AddDays(1)
+                ? "утре " + slotLocal.ToString("HH:mm", CultureInfo.InvariantCulture)
+                : slotLocal.ToString("dd.MM HH:mm", CultureInfo.InvariantCulture);
 }

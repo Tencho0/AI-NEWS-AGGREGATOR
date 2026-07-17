@@ -77,7 +77,7 @@ public sealed class FacebookTestPostService(
         try
         {
             await gateway.Value.SendHtmlAsync(telegram.ReviewChatId, ReviewMessageRenderer.Escape(text),
-                withReviewButtons: false, draftIdForButtons: null, ct);
+                withReviewButtons: false, draftIdForButtons: null, scheduleButtonLabel: null, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

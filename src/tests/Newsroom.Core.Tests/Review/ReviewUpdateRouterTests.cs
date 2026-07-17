@@ -49,6 +49,12 @@ public class ReviewUpdateRouterTests
     }
 
     [Fact]
+    public void Schedule_callback_routes_to_ScheduleDraft()
+    {
+        Assert.Equal(new ScheduleDraft(42), RouteCallback(Callback("schedule:42")));
+    }
+
+    [Fact]
     public void Image_callback_is_gated_like_every_other_callback()
     {
         Assert.Equal(new Ignore(ReviewUpdateRouter.ReasonNotAllowlisted),

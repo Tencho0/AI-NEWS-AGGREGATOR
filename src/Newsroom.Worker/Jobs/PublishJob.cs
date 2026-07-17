@@ -328,7 +328,7 @@ public sealed class PublishJob(
                 telegram.ReviewChatId,
                 $"🚀 Публикувано: <b>{headline}</b>\n<a href=\"{link}\">{link}</a>\n\n"
                     + $"📋 Текст за групите (копирай и постни):\n<pre>{shareText}</pre>",
-                withReviewButtons: false, draftIdForButtons: null, ct);
+                withReviewButtons: false, draftIdForButtons: null, scheduleButtonLabel: null, ct);
 
             var view = await reviews.GetReviewViewAsync(article.DraftId, ct);
             if (view?.TelegramMessageId is { } messageId)
@@ -369,7 +369,7 @@ public sealed class PublishJob(
         {
             await gateway.Value.SendHtmlAsync(
                 telegram.ReviewChatId, ReviewMessageRenderer.Escape(text),
-                withReviewButtons: false, draftIdForButtons: null, ct);
+                withReviewButtons: false, draftIdForButtons: null, scheduleButtonLabel: null, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

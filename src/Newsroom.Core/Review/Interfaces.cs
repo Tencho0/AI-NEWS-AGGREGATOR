@@ -11,10 +11,13 @@ public interface ITelegramGateway
     Task<TgUpdateBatch> GetUpdatesAsync(long offset, int timeoutSeconds, CancellationToken ct);
 
     /// <summary>Sends an HTML message (link previews off). With <paramref name="withReviewButtons"/>
-    /// the review keyboard (✅/✏️/❌) carrying <paramref name="draftIdForButtons"/> is attached.</summary>
+    /// the review keyboard (✅/✏️/❌) carrying <paramref name="draftIdForButtons"/> is attached;
+    /// a non-null <paramref name="scheduleButtonLabel"/> adds a second row with the 📅 button
+    /// ("schedule:{draftId}") — the label carries the suggested slot and is advisory only.</summary>
     /// <returns>The Telegram message id.</returns>
     Task<long> SendHtmlAsync(
-        long chatId, string html, bool withReviewButtons, long? draftIdForButtons, CancellationToken ct);
+        long chatId, string html, bool withReviewButtons, long? draftIdForButtons,
+        string? scheduleButtonLabel, CancellationToken ct);
 
     /// <summary>Edits a previously sent message; <paramref name="removeButtons"/> drops the
     /// inline keyboard (resolved drafts must not keep live buttons).</summary>

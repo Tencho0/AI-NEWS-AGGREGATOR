@@ -74,17 +74,24 @@ public sealed class TelegramGateway(string botToken) : ITelegramGateway
     }
 
     public async Task<long> SendHtmlAsync(
-        long chatId, string html, bool withReviewButtons, long? draftIdForButtons, CancellationToken ct)
+        long chatId, string html, bool withReviewButtons, long? draftIdForButtons,
+        string? scheduleButtonLabel, CancellationToken ct)
     {
-        InlineKeyboardMarkup? keyboard = withReviewButtons && draftIdForButtons is { } draftId
-            ? new InlineKeyboardMarkup([
+        InlineKeyboardMarkup? keyboard = null;
+        if (withReviewButtons && draftIdForButtons is { } draftId)
+        {
+            List<InlineKeyboardButton[]> rows =
+            [
                 [
                     InlineKeyboardButton.WithCallbackData("✅ Одобри", $"approve:{draftId}"),
                     InlineKeyboardButton.WithCallbackData("✏️ Промени", $"changes:{draftId}"),
                     InlineKeyboardButton.WithCallbackData("❌ Откажи", $"reject:{draftId}"),
                 ],
-            ])
-            : null;
+            ];
+            if (scheduleButtonLabel is not null)
+                rows.Add([InlineKeyboardButton.WithCallbackData(scheduleButtonLabel, $"schedule:{draftId}")]);
+            keyboard = new InlineKeyboardMarkup(rows);
+        }
 
         var message = await bot.SendMessage(
             chatId,

@@ -68,7 +68,7 @@ public sealed class DailyDigestJob(
             var stats = await operations.GetDigestStatsAsync(DateTime.UtcNow.Date, ct);
             await gateway.Value.SendHtmlAsync(
                 telegram.ReviewChatId, DigestComposer.Compose(stats),
-                withReviewButtons: false, draftIdForButtons: null, ct);
+                withReviewButtons: false, draftIdForButtons: null, scheduleButtonLabel: null, ct);
             // Marked sent only after the send succeeded — a failed send retries next minute.
             await operations.SetConfigValueAsync(LastSentDateKey, today, ct);
             logger.LogInformation("ℹ️ Daily digest sent for {Date}", today);
