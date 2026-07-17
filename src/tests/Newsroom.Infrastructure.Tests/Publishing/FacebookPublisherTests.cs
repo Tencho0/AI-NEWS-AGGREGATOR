@@ -102,6 +102,21 @@ public class FacebookPublisherTests
     }
 
     [Fact]
+    public async Task Blank_headline_posts_the_teaser_without_leading_blank_lines()
+    {
+        var (publisher, handler) = CreatePublisher(request => request.Path == FeedPath
+            ? Json(HttpStatusCode.OK, PostedJson)
+            : Json(HttpStatusCode.OK, PermalinkJson));
+
+        await publisher.PublishAsync(
+            Post() with { Headline = "", Teaser = "Кука на поста.\n\n#Пирин", ArticleUrl = "" },
+            CancellationToken.None);
+
+        var feed = Assert.Single(handler.Requests, r => r.Path == FeedPath);
+        Assert.Equal("Кука на поста.\n\n#Пирин", ParseForm(feed.Body)["message"]);
+    }
+
+    [Fact]
     public async Task Posts_a_photo_with_the_image_url_and_caption_when_the_draft_has_a_url_image()
     {
         var (publisher, handler) = CreatePublisher(request => request.Path == PhotoPath

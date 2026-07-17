@@ -34,7 +34,11 @@ public sealed class FacebookPublisher(
 
     public async Task<FacebookPostResult> PublishAsync(FacebookPost post, CancellationToken ct)
     {
-        var message = $"{post.Headline}\n\n{post.Teaser}";
+        // Caption-carrying drafts ship Headline = "" — the caption's first line is the hook and
+        // must open the post; legacy drafts keep the headline + body layout.
+        var message = string.IsNullOrWhiteSpace(post.Headline)
+            ? post.Teaser
+            : $"{post.Headline}\n\n{post.Teaser}";
         // The link (→ OG card) is included only when configured and present; otherwise it is a
         // plain text post that does not carry the site URL (Facebook:IncludeLink).
         var withLink = options.IncludeLink && !string.IsNullOrWhiteSpace(post.ArticleUrl);

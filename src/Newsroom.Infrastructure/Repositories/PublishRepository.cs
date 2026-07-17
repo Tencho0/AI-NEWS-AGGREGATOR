@@ -78,7 +78,9 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
             """
             SELECT TOP (@maxCount)
                    d.Id AS DraftId, ISNULL(d.Headline, '') AS Headline,
-                   d.SeoDescription, ISNULL(d.BodyMarkdown, '') AS BodyMarkdown,
+                   d.SeoDescription,
+                   d.FacebookCaption, d.FacebookHashtagsJson,
+                   ISNULL(d.BodyMarkdown, '') AS BodyMarkdown,
                    site.ExternalUrl AS ArticleUrl
             FROM dbo.nw_Draft d
             CROSS APPLY (
@@ -109,9 +111,14 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
                 succeededStatus = SucceededStatus,
                 failedStatus = FailedStatus,
             });
-        return rows.Select(r => new FacebookPost(
-            r.DraftId, r.Headline, FacebookTeaser.Compose(r.SeoDescription, r.BodyMarkdown),
-            r.ArticleUrl)).ToList();
+        return rows.Select(r => string.IsNullOrWhiteSpace(r.FacebookCaption)
+            ? new FacebookPost(
+                r.DraftId, r.Headline, FacebookTeaser.Compose(r.SeoDescription, r.BodyMarkdown),
+                r.ArticleUrl)
+            : new FacebookPost(
+                r.DraftId, Headline: "",
+                FacebookCaption.Compose(r.FacebookCaption, ParseStringList(r.FacebookHashtagsJson)),
+                r.ArticleUrl)).ToList();
     }
 
     public async Task<IReadOnlyList<FacebookPost>> GetApprovedForFacebookAsync(
@@ -128,6 +135,7 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
             SELECT TOP (@maxCount)
                    d.Id AS DraftId, ISNULL(d.Headline, '') AS Headline,
                    ISNULL(d.BodyMarkdown, '') AS BodyMarkdown, d.PromptVersion,
+                   d.FacebookCaption, d.FacebookHashtagsJson,
                    img.SourceKind AS ImageKind, img.Url AS ImageUrl
             FROM dbo.nw_Draft d
             OUTER APPLY (
@@ -156,19 +164,26 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
                 succeededStatus = SucceededStatus,
                 failedStatus = FailedStatus,
             });
-        // Facebook-only: the post IS the article (no site link to carry the full read), so the
-        // whole body goes in — not the short teaser the link-post path uses.
-        // Editor-authored drafts (/post — PromptVersion "editor-v1") publish verbatim: the editor
-        // already typed the final text, so stripping markdown markers (e.g. hashtags like
-        // "#Пирин") would mangle it (owner decision 2026-07-13). AI drafts keep going through
-        // ComposeFullBody, which strips markdown. A ✏️-regenerated draft is AI output with its
-        // own PromptVersion, so keying off the draft row (not the topic) is correct here.
-        return rows.Select(r => new FacebookPost(
-            r.DraftId, r.Headline,
-            r.PromptVersion == ManualTopic.EditorPromptVersion
-                ? r.BodyMarkdown // already ISNULL(..., '') above — never null
-                : FacebookTeaser.ComposeFullBody(r.BodyMarkdown),
-            ArticleUrl: "", ToFacebookImage(r.ImageKind, r.ImageUrl))).ToList();
+        // Facebook-only: the post IS the article (no site link to carry the full read).
+        // Priority: (1) editor-authored drafts (/post — PromptVersion "editor-v1") publish the
+        // body verbatim (owner decision 2026-07-13); (2) caption-carrying AI drafts (draft-v2+)
+        // post the social caption + hashtags verbatim with no headline — the caption's first
+        // line is the hook; (3) legacy AI drafts without a caption keep the old
+        // headline + ComposeFullBody layout.
+        return rows.Select(r =>
+        {
+            var image = ToFacebookImage(r.ImageKind, r.ImageUrl);
+            if (r.PromptVersion == ManualTopic.EditorPromptVersion)
+                return new FacebookPost(r.DraftId, r.Headline, r.BodyMarkdown, ArticleUrl: "", image);
+            if (!string.IsNullOrWhiteSpace(r.FacebookCaption))
+                return new FacebookPost(
+                    r.DraftId, Headline: "",
+                    FacebookCaption.Compose(r.FacebookCaption, ParseStringList(r.FacebookHashtagsJson)),
+                    ArticleUrl: "", image);
+            return new FacebookPost(
+                r.DraftId, r.Headline, FacebookTeaser.ComposeFullBody(r.BodyMarkdown),
+                ArticleUrl: "", image);
+        }).ToList();
     }
 
     /// <summary>The chosen draft image as a Facebook photo source: editor uploads live on the
@@ -189,7 +204,9 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
         var row = await connection.QuerySingleOrDefaultAsync<FacebookRow>(
             """
             SELECT d.Id AS DraftId, ISNULL(d.Headline, '') AS Headline,
-                   d.SeoDescription, ISNULL(d.BodyMarkdown, '') AS BodyMarkdown,
+                   d.SeoDescription,
+                   d.FacebookCaption, d.FacebookHashtagsJson,
+                   ISNULL(d.BodyMarkdown, '') AS BodyMarkdown,
                    '' AS ArticleUrl
             FROM dbo.nw_Draft d
             WHERE d.Id = @draftId
@@ -197,8 +214,12 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
             new { draftId });
         return row is null
             ? null
-            : new FacebookPost(row.DraftId, row.Headline,
-                FacebookTeaser.Compose(row.SeoDescription, row.BodyMarkdown), row.ArticleUrl);
+            : string.IsNullOrWhiteSpace(row.FacebookCaption)
+                ? new FacebookPost(row.DraftId, row.Headline,
+                    FacebookTeaser.Compose(row.SeoDescription, row.BodyMarkdown), row.ArticleUrl)
+                : new FacebookPost(row.DraftId, Headline: "",
+                    FacebookCaption.Compose(row.FacebookCaption, ParseStringList(row.FacebookHashtagsJson)),
+                    row.ArticleUrl);
     }
 
     public async Task RecordSuccessAsync(
@@ -355,22 +376,29 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
     private static string? Truncate(string? value, int max) =>
         value is null || value.Length <= max ? value : value[..max];
 
-    /// <summary>Dapper row shape of <see cref="GetPendingFacebookAsync"/>.</summary>
+    /// <summary>Dapper row shape of <see cref="GetPendingFacebookAsync"/> and
+    /// <see cref="GetFacebookPostForDraftAsync"/> — the Facebook caption/hashtags are preferred
+    /// over the SeoDescription-based teaser when the draft carries one.</summary>
     private sealed record FacebookRow(
         long DraftId,
         string Headline,
         string? SeoDescription,
         string BodyMarkdown,
+        string? FacebookCaption,
+        string? FacebookHashtagsJson,
         string ArticleUrl);
 
     /// <summary>Dapper row shape of <see cref="GetApprovedForFacebookAsync"/> — adds the chosen
-    /// image (source kind + URL/local path) and PromptVersion (to detect editor-authored drafts
-    /// that must publish verbatim) to the Facebook-only post.</summary>
+    /// image (source kind + URL/local path), PromptVersion (to detect editor-authored drafts
+    /// that must publish verbatim), and the Facebook caption/hashtags (preferred over the body
+    /// for AI drafts that carry one) to the Facebook-only post.</summary>
     private sealed record FacebookApprovedRow(
         long DraftId,
         string Headline,
         string BodyMarkdown,
         string? PromptVersion,
+        string? FacebookCaption,
+        string? FacebookHashtagsJson,
         string? ImageKind,
         string? ImageUrl);
 
