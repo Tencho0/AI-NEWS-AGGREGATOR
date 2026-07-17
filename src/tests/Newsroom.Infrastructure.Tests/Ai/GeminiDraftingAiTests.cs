@@ -196,6 +196,19 @@ public class GeminiDraftingAiTests
     }
 
     [Fact]
+    public async Task Generate_prompt_asks_for_the_facebook_caption_and_hashtags()
+    {
+        var (client, fake, _) = CreateClient(ValidDraftJson);
+
+        await client.GenerateAsync(Bundle(), null, CancellationToken.None);
+
+        var systemPrompt = fake.LastMessages!.Single(m => m.Role == ChatRole.System).Text;
+        Assert.Contains("facebookCaption", systemPrompt);
+        Assert.Contains("facebookHashtags", systemPrompt);
+        Assert.Contains("БЕЗ главни букви", systemPrompt); // the hook line must not be ALL CAPS
+    }
+
+    [Fact]
     public async Task SelfCheck_parses_unsupported_claims_and_usage()
     {
         var (client, draftFake, selfCheckFake) = CreateClient(ValidDraftJson,

@@ -29,7 +29,7 @@ public sealed class DraftJob(
 {
     private const string Stage = "Draft";
     private const string SelfCheckStage = "SelfCheck";
-    private const string PromptVersion = "draft-v1";
+    private const string PromptVersion = "draft-v2";
 
     private bool missingKeyWarned;
 
