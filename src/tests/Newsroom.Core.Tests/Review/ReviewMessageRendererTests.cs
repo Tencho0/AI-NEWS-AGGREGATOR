@@ -189,4 +189,40 @@ public class ReviewMessageRendererTests
 
         Assert.DoesNotContain("📘 Facebook:", ReviewMessageRenderer.RenderHtml(view));
     }
+
+    [Fact]
+    public void Body_excerpt_shrinks_when_the_view_carries_a_facebook_caption()
+    {
+        // 10-char words joined by spaces, well over both the 1500 and the 900 budgets.
+        var body = string.Join(" ", Enumerable.Repeat("abcdefghij", 200));
+        var view = new DraftReviewView(
+            DraftId: 7, Version: 1, TopicLabel: "Тема", TopicScore: 6.5, SourceCount: 2,
+            Headline: "ЗАГЛАВИЕ", Subtitle: null, BodyMarkdown: body,
+            Category: "Общество", Region: "Благоевград", Tags: [],
+            Sources: [], FlaggedClaims: [], Confidence: 0.8, Cost: 0.001m, Model: "gemini",
+            ImageCount: 0, TelegramMessageId: null, IsManual: false,
+            FacebookCaption: "Кука на поста.\n\nОще факти за събитието.\n\nКакво мислите?",
+            FacebookHashtags: ["#Благоевград"]);
+
+        var html = ReviewMessageRenderer.RenderHtml(view);
+
+        Assert.Contains("📘 Facebook:", html);
+        var rendered = html.Split('\n').Single(line => line.EndsWith(" …", StringComparison.Ordinal));
+        Assert.True(rendered.Length <= ReviewMessageRenderer.MaxBodyCharsWithCaption + 2,
+            $"expected the shrunk ~900-char budget, got a {rendered.Length}-char excerpt");
+        Assert.True(rendered.Length < ReviewMessageRenderer.MaxBodyChars,
+            "the 900-char caption budget must be smaller than the default 1500-char one");
+    }
+
+    [Fact]
+    public void Captionless_views_keep_the_full_1500_char_body_budget()
+    {
+        var body = string.Join(" ", Enumerable.Repeat("abcdefghij", 200));
+
+        var html = ReviewMessageRenderer.RenderHtml(View(body: body));
+
+        var rendered = html.Split('\n').Single(line => line.EndsWith(" …", StringComparison.Ordinal));
+        Assert.True(rendered.Length <= ReviewMessageRenderer.MaxBodyChars + 2);
+        Assert.True(rendered.Length > ReviewMessageRenderer.MaxBodyCharsWithCaption);
+    }
 }

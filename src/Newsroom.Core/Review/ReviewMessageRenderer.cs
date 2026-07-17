@@ -14,6 +14,11 @@ public static class ReviewMessageRenderer
 {
     public const int MaxBodyChars = 1500;
 
+    /// <summary>Body budget used instead of <see cref="MaxBodyChars"/> when the view carries a
+    /// Facebook caption: the 📘 block adds up to ~960 chars on top of the excerpt, and the whole
+    /// card must stay under Telegram's 4096-char sendMessage/editMessageText limit.</summary>
+    public const int MaxBodyCharsWithCaption = 900;
+
     public static string RenderHtml(DraftReviewView v)
     {
         var html = new StringBuilder();
@@ -36,7 +41,8 @@ public static class ReviewMessageRenderer
         if (!string.IsNullOrWhiteSpace(v.Subtitle))
             html.Append("<i>").Append(Escape(v.Subtitle)).Append("</i>").Append('\n');
 
-        html.Append('\n').Append(Escape(TruncateOnWordBoundary(v.BodyMarkdown, MaxBodyChars))).Append('\n');
+        var bodyBudget = string.IsNullOrWhiteSpace(v.FacebookCaption) ? MaxBodyChars : MaxBodyCharsWithCaption;
+        html.Append('\n').Append(Escape(TruncateOnWordBoundary(v.BodyMarkdown, bodyBudget))).Append('\n');
 
         if (!string.IsNullOrWhiteSpace(v.Category) || !string.IsNullOrWhiteSpace(v.Region) || v.Tags.Count > 0)
         {

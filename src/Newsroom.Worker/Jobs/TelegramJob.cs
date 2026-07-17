@@ -106,12 +106,22 @@ public sealed class TelegramJob(
         foreach (var view in pending)
         {
             ct.ThrowIfCancellationRequested();
-            var html = ReviewMessageRenderer.RenderHtml(view);
-            var messageId = await gateway.Value.SendHtmlAsync(
-                options.ReviewChatId, html, withReviewButtons: true, view.DraftId, scheduleLabel, ct);
-            await reviews.SetTelegramMessageIdAsync(view.DraftId, messageId, ct);
-            logger.LogInformation("📨 Draft {DraftId} v{Version} posted for review (message {MessageId})",
-                view.DraftId, view.Version, messageId);
+            try
+            {
+                var html = ReviewMessageRenderer.RenderHtml(view);
+                var messageId = await gateway.Value.SendHtmlAsync(
+                    options.ReviewChatId, html, withReviewButtons: true, view.DraftId, scheduleLabel, ct);
+                await reviews.SetTelegramMessageIdAsync(view.DraftId, messageId, ct);
+                logger.LogInformation("📨 Draft {DraftId} v{Version} posted for review (message {MessageId})",
+                    view.DraftId, view.Version, messageId);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Without this, a single failing sendMessage re-serves the same draft first every
+                // cycle (ORDER BY DraftId) and wedges card dispatch + the TTL sweep + polling.
+                logger.LogWarning(ex,
+                    "Draft {DraftId}: review card dispatch failed, will retry next cycle", view.DraftId);
+            }
         }
 
         await DispatchPendingPhotosAsync(options, ct);
