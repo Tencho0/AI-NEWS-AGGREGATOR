@@ -13,7 +13,34 @@ public sealed record FacebookPost(
     string Headline,
     string Teaser,
     string ArticleUrl,
-    FacebookImage? Image = null);
+    FacebookImage? Image = null)
+{
+    /// <summary>Editor-facing title for notifications/alerts: the headline when present,
+    /// otherwise the caption post's hook (first line of the message text, word-truncated) —
+    /// caption posts ship Headline = "" by design and must still be identifiable in Telegram.</summary>
+    public string DisplayTitle
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(Headline))
+                return Headline;
+
+            var span = Teaser.AsSpan();
+            var newline = span.IndexOf('\n');
+            if (newline >= 0)
+                span = span[..newline];
+            var line = span.Trim().ToString();
+
+            if (line.Length <= 80)
+                return line;
+
+            // Cut on a word boundary within the first 80 chars; a spaceless run falls back to a
+            // hard cut rather than LastIndexOf returning -1/0 and producing an empty prefix.
+            var lastSpace = line.LastIndexOf(' ', 79);
+            return (lastSpace > 0 ? line[..lastSpace].TrimEnd() : line[..79]) + "…";
+        }
+    }
+}
 
 /// <summary>The draft's chosen image for a Facebook photo post. Exactly one of <see cref="Url"/>
 /// (a stock/library image Facebook fetches server-side) or <see cref="LocalPath"/> (an editor

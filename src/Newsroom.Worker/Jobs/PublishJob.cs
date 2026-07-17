@@ -274,11 +274,11 @@ public sealed class PublishJob(
             return; // retried automatically next cycles
 
         logger.LogWarning("Draft {DraftId} ({Headline}) will not be re-posted to Facebook",
-            post.DraftId, post.Headline);
+            post.DraftId, post.DisplayTitle);
         var reason = Truncate(error, 200);
         await TryAlertAsync(rejected
-            ? $"⚠️ Facebook отхвърли поста за „{post.Headline}“: {reason}\nСайтът е публикуван — постни ръчно."
-            : $"⚠️ Постът във Facebook за „{post.Headline}“ се провали след {facebookOptions.MaxAttempts} опита: {reason}\nСайтът е публикуван — постни ръчно.",
+            ? $"⚠️ Facebook отхвърли поста за „{post.DisplayTitle}“: {reason}\nСайтът е публикуван — постни ръчно."
+            : $"⚠️ Постът във Facebook за „{post.DisplayTitle}“ се провали след {facebookOptions.MaxAttempts} опита: {reason}\nСайтът е публикуван — постни ръчно.",
             ct);
     }
 
@@ -353,8 +353,8 @@ public sealed class PublishJob(
         FacebookPost post, FacebookPostResult result, CancellationToken ct)
     {
         var text = facebookOptions.DryRun
-            ? $"📘 Публикувано във Facebook: „{post.Headline}“ (пробен режим — без реална публикация)"
-            : $"📘 Публикувано във Facebook: „{post.Headline}“\n{result.PermalinkUrl ?? result.PostId}";
+            ? $"📘 Публикувано във Facebook: „{post.DisplayTitle}“ (пробен режим — без реална публикация)"
+            : $"📘 Публикувано във Facebook: „{post.DisplayTitle}“\n{result.PermalinkUrl ?? result.PostId}";
         return TryAlertAsync(text, ct);
     }
 

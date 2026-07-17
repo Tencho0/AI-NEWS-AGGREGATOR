@@ -72,8 +72,8 @@ public sealed class FacebookTestPostService(
             return;
 
         var text = options.DryRun
-            ? $"📘 Facebook тест (пробен режим) за „{post.Headline}“ — нищо не е публикувано."
-            : $"📘 Публикувано във Facebook (тест): „{post.Headline}“\n{result.PermalinkUrl ?? result.PostId}";
+            ? $"📘 Facebook тест (пробен режим) за „{post.DisplayTitle}“ — нищо не е публикувано."
+            : $"📘 Публикувано във Facebook (тест): „{post.DisplayTitle}“\n{result.PermalinkUrl ?? result.PostId}";
         try
         {
             await gateway.Value.SendHtmlAsync(telegram.ReviewChatId, ReviewMessageRenderer.Escape(text),
