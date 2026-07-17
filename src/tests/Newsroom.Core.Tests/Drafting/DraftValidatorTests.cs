@@ -12,6 +12,14 @@ public class DraftValidatorTests
     private static readonly string ValidBody = string.Concat(
         Enumerable.Repeat("Общинската администрация в Благоевград съобщи за нови мерки. ", 10));
 
+    /// <summary>~330 chars: short sentence-case hook line, facts paragraph, closing question —
+    /// comfortably inside the 200–900 caption bounds.</summary>
+    private static readonly string ValidCaption =
+        "Общината обяви нови мерки за контрол.\n\n"
+        + string.Concat(Enumerable.Repeat(
+            "Промените влизат в сила от понеделник и засягат центъра на града. ", 4))
+        + "\nКакво мислите за промените?";
+
     private static DraftContent ValidDraft() => new(
         Headline: "НОВИ МЕРКИ В БЛАГОЕВГРАД: ОБЩИНАТА ЗАТЯГА КОНТРОЛА",
         Subtitle: "Кметът обяви промените на брифинг",
@@ -25,8 +33,8 @@ public class DraftValidatorTests
         ImageAltTextBg: "Сградата на общината в Благоевград",
         FlaggedClaims: [],
         Confidence: 0.8,
-        FacebookCaption: "",
-        FacebookHashtags: []);
+        FacebookCaption: ValidCaption,
+        FacebookHashtags: ["#Благоевград"]);
 
     private static IReadOnlyList<string> Validate(DraftContent draft) =>
         DraftValidator.Validate(draft, Categories, Regions, Options);
@@ -151,10 +159,76 @@ public class DraftValidatorTests
         });
         Assert.True(violations.Count >= 3);
     }
+
+    [Fact]
+    public void Empty_facebook_caption_is_a_violation()
+    {
+        var violations = Validate(ValidDraft() with { FacebookCaption = "" });
+        Assert.Contains(violations, v => v.Contains("Facebook caption"));
+    }
+
+    [Fact]
+    public void Overlong_facebook_caption_is_a_violation()
+    {
+        var violations = Validate(ValidDraft() with { FacebookCaption = new string('а', 950) });
+        Assert.Contains(violations, v => v.Contains("Facebook caption"));
+    }
+
+    [Fact]
+    public void All_caps_facebook_caption_is_a_violation()
+    {
+        var violations = Validate(ValidDraft() with
+        {
+            FacebookCaption = ValidCaption.ToUpperInvariant(),
+        });
+        Assert.Contains(violations, v => v.Contains("uppercase"));
+    }
+
+    [Fact]
+    public void Overlong_facebook_caption_first_line_is_a_violation()
+    {
+        var caption = new string('а', 130) + "\n" + new string('б', 200);
+        var violations = Validate(ValidDraft() with { FacebookCaption = caption });
+        Assert.Contains(violations, v => v.Contains("first line"));
+    }
+
+    [Fact]
+    public void Markdown_or_hashtag_markers_inside_the_caption_are_a_violation()
+    {
+        var violations = Validate(ValidDraft() with
+        {
+            FacebookCaption = ValidCaption + " **важно** #Пирин",
+        });
+        Assert.Contains(violations, v => v.Contains("marker"));
+    }
+
+    [Fact]
+    public void Malformed_facebook_hashtag_is_a_violation()
+    {
+        var violations = Validate(ValidDraft() with { FacebookHashtags = ["#за дръжка"] });
+        Assert.Contains(violations, v => v.Contains("hashtag"));
+    }
+
+    [Fact]
+    public void Normalize_repairs_hashtags_prefix_dedupes_and_caps_at_three()
+    {
+        var draft = ValidDraft() with
+        {
+            FacebookCaption = "  " + ValidCaption + "  ",
+            FacebookHashtags = ["Благоевград", "#Благоевград", "#Пирин", "", "#Струма", "#Четвърти"],
+        };
+
+        var normalized = DraftValidator.Normalize(draft);
+
+        Assert.Equal(ValidCaption, normalized.FacebookCaption);
+        Assert.Equal(["#Благоевград", "#Пирин", "#Струма"], normalized.FacebookHashtags);
+    }
 }
 
 public class DraftNormalizerTests
 {
+    private static readonly string NormalizerValidCaption = "Тестова подпис с валиден тестов текст.";
+
     private static Newsroom.Core.Drafting.DraftContent Draft(string seoTitle, string seoDescription) => new(
         Headline: "ЗАГЛАВИЕ",
         Subtitle: null,
@@ -168,8 +242,8 @@ public class DraftNormalizerTests
         ImageAltTextBg: null,
         FlaggedClaims: [],
         Confidence: 0.9,
-        FacebookCaption: "",
-        FacebookHashtags: []);
+        FacebookCaption: NormalizerValidCaption,
+        FacebookHashtags: ["#Тест"]);
 
     [Fact]
     public void Normalize_truncates_overlong_seo_fields_at_word_boundary()

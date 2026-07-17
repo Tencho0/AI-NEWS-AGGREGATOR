@@ -11,6 +11,11 @@ public static class DraftValidator
     private const int MaxSeoTitleChars = 70;
     private const int MaxSeoDescriptionChars = 160;
     private const int MaxImageSearchQueries = 4;
+    private const int MinFacebookCaptionChars = 200;
+    private const int MaxFacebookCaptionChars = 900;
+    private const int MaxFacebookCaptionFirstLineChars = 120;
+    private const double MaxFacebookCaptionUppercaseRatio = 0.6;
+    private const int MaxFacebookHashtags = 3;
 
     /// <summary>
     /// Repairs cosmetic, safely-fixable overflows before validation: SEO title/description are
@@ -22,7 +27,21 @@ public static class DraftValidator
     {
         SeoTitle = TruncateAtWordBoundary(draft.SeoTitle.Trim(), MaxSeoTitleChars),
         SeoDescription = TruncateAtWordBoundary(draft.SeoDescription.Trim(), MaxSeoDescriptionChars),
+        FacebookCaption = draft.FacebookCaption.Trim(),
+        FacebookHashtags = NormalizeHashtags(draft.FacebookHashtags),
     };
+
+    /// <summary>Repairs safely-fixable hashtag issues: missing leading '#', duplicates (case-
+    /// insensitive), blanks, overflow beyond the cap. Malformed characters are NOT repaired —
+    /// Validate flags those (a mangled hashtag is a content problem, not a cosmetic one).</summary>
+    private static IReadOnlyList<string> NormalizeHashtags(IReadOnlyList<string> hashtags) =>
+        hashtags
+            .Select(h => h.Trim().TrimStart('#'))
+            .Where(h => h.Length > 0)
+            .Select(h => "#" + h)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(MaxFacebookHashtags)
+            .ToList();
 
     private static string TruncateAtWordBoundary(string value, int maxChars)
     {
@@ -80,6 +99,37 @@ public static class DraftValidator
         if (draft.Confidence is < 0 or > 1 || double.IsNaN(draft.Confidence))
             violations.Add($"Confidence {draft.Confidence} is outside [0, 1].");
 
+        if (draft.FacebookCaption.Length < MinFacebookCaptionChars)
+            violations.Add(
+                $"Facebook caption is {draft.FacebookCaption.Length} chars (min {MinFacebookCaptionChars}).");
+        else if (draft.FacebookCaption.Length > MaxFacebookCaptionChars)
+            violations.Add(
+                $"Facebook caption is {draft.FacebookCaption.Length} chars (max {MaxFacebookCaptionChars}).");
+        else
+        {
+            var firstLine = draft.FacebookCaption.AsSpan(0, FirstLineLength(draft.FacebookCaption));
+            if (firstLine.Length > MaxFacebookCaptionFirstLineChars)
+                violations.Add(
+                    $"Facebook caption first line is {firstLine.Length} chars (max {MaxFacebookCaptionFirstLineChars}) — the hook must fit above the fold.");
+
+            if (draft.FacebookCaption.IndexOfAny(['*', '#']) >= 0)
+                violations.Add("Facebook caption contains markdown/hashtag markers (* or #) — hashtags belong in facebookHashtags.");
+
+            var uppercaseRatio = UppercaseLetterRatio(draft.FacebookCaption);
+            if (uppercaseRatio > MaxFacebookCaptionUppercaseRatio)
+                violations.Add(
+                    $"Facebook caption is {uppercaseRatio:P0} uppercase (max {MaxFacebookCaptionUppercaseRatio:P0}) — no ALL CAPS on Facebook.");
+        }
+
+        if (draft.FacebookHashtags.Count > MaxFacebookHashtags)
+            violations.Add(
+                $"Draft has {draft.FacebookHashtags.Count} Facebook hashtags (max {MaxFacebookHashtags}).");
+        foreach (var hashtag in draft.FacebookHashtags)
+        {
+            if (hashtag.Length < 2 || hashtag[0] != '#' || !hashtag[1..].All(char.IsLetterOrDigit))
+                violations.Add($"Facebook hashtag '{hashtag}' is malformed (expected #дума, letters/digits only).");
+        }
+
         return violations;
     }
 
@@ -97,5 +147,32 @@ public static class DraftValidator
                 cyrillic++;
         }
         return letters == 0 ? 0 : (double)cyrillic / letters;
+    }
+
+    private static int FirstLineLength(string text)
+    {
+        var newline = text.IndexOf('\n', StringComparison.Ordinal);
+        return newline < 0 ? text.Length : newline;
+    }
+
+    /// <summary>Share of uppercase among the cased letters of <paramref name="text"/>
+    /// (0 when there are none) — the ALL-CAPS detector for the Facebook caption.</summary>
+    private static double UppercaseLetterRatio(string text)
+    {
+        var cased = 0;
+        var upper = 0;
+        foreach (var ch in text)
+        {
+            if (char.IsUpper(ch))
+            {
+                cased++;
+                upper++;
+            }
+            else if (char.IsLower(ch))
+            {
+                cased++;
+            }
+        }
+        return cased == 0 ? 0 : (double)upper / cased;
     }
 }
