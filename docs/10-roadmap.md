@@ -126,7 +126,10 @@ Goal: repo + docs + walking skeleton.
 
 ## Later (backlog, each needs an ADR when promoted)
 
-Scheduled publishing · engagement feedback loop (FB/site stats → trend weights) · web review UI ·
+**Smart insights** (FB post metrics polling → digest performance report → data-driven best-time
+suggestions → trend-weight feedback; sketch in
+superpowers/specs/2026-07-17-facebook-engagement-design.md §Deferred — owner decision 2026-07-17:
+build later, not with the caption/scheduling round) · web review UI ·
 additional distribution channels (Instagram via Graph API, newsletter) · full-auto mode for
 low-risk categories · Playwright for JS-heavy sources · Quartz.NET if scheduling outgrows timers.
 
