@@ -99,6 +99,7 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
                   SELECT SUM(p.Attempts) FROM dbo.nw_PublishRecord p
                   WHERE p.DraftId = d.Id AND p.Destination = @facebook
                     AND p.Status = @failedStatus), 0) < @maxAttempts
+              AND (d.ScheduledForUtc IS NULL OR d.ScheduledForUtc <= SYSUTCDATETIME())
             ORDER BY d.Id
             """,
             new
@@ -153,6 +154,7 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
                   SELECT SUM(p.Attempts) FROM dbo.nw_PublishRecord p
                   WHERE p.DraftId = d.Id AND p.Destination = @facebook
                     AND p.Status = @failedStatus), 0) < @maxAttempts
+              AND (d.ScheduledForUtc IS NULL OR d.ScheduledForUtc <= SYSUTCDATETIME())
             ORDER BY d.Id
             """,
             new

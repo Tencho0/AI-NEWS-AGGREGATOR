@@ -114,6 +114,22 @@ public interface IReviewRepository
     Task<bool> TryStartRegenerationAsync(
         long draftId, string instructions, long userId, string? userName, CancellationToken ct);
 
+    /// <summary>📅: PendingReview → Approved with ScheduledForUtc set — the publish gate holds
+    /// the draft until the slot arrives. Writes the 'Scheduled' nw_ReviewAction (comment = the
+    /// slot, ISO-8601 UTC) in the same transaction. False when the draft is not PendingReview.</summary>
+    Task<bool> TryScheduleAsync(
+        long draftId, DateTime scheduledForUtc, long userId, string? userName, CancellationToken ct);
+
+    /// <summary>✅ on an already-scheduled draft: clears ScheduledForUtc so the next publish
+    /// cycle picks the draft up immediately. Guarded on Approved + a schedule being present;
+    /// false otherwise (not scheduled, already published, unknown). Writes 'ScheduleOverridden'.</summary>
+    Task<bool> TryUnscheduleAsync(long draftId, long userId, string? userName, CancellationToken ct);
+
+    /// <summary>Existing Facebook commitments for the slot suggester: UTC times of Succeeded
+    /// 'facebook' publish records since <paramref name="fromUtc"/> plus every ScheduledForUtc
+    /// (≥ fromUtc) still pending on an Approved draft.</summary>
+    Task<IReadOnlyList<DateTime>> GetFacebookCommitmentsUtcAsync(DateTime fromUtc, CancellationToken ct);
+
     /// <summary>PendingReview drafts created before <paramref name="cutoffUtc"/> → Expired.
     /// MessageId is null for drafts that never reached Telegram (delivery failure).</summary>
     Task<IReadOnlyList<(long DraftId, long? MessageId)>> ExpireStaleAsync(

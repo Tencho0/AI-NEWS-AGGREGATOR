@@ -7,6 +7,7 @@ using Dapper;
 using Microsoft.Extensions.Configuration;
 
 using Newsroom.Core.Drafting;
+using Newsroom.Core.Publishing;
 using Newsroom.Core.Review;
 using Newsroom.Core.Scraping;
 using Newsroom.Core.Trends;
@@ -31,6 +32,8 @@ public sealed class ReviewRepository(IDbConnectionFactory db, IConfiguration con
     private const string EditorUploadAttribution = "редакторска снимка";
     /// <summary>Mirrors HeartbeatService.ConfigKey (the Worker project is not referenced here).</summary>
     private const string HeartbeatKey = "Worker:LastHeartbeatUtc";
+    /// <summary>Mirrors PublishRepository's nw_PublishRecord.Status value.</summary>
+    private const string PublishSucceededStatus = "Succeeded";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -337,6 +340,84 @@ public sealed class ReviewRepository(IDbConnectionFactory db, IConfiguration con
 
         transaction.Commit();
         return true;
+    }
+
+    public async Task<bool> TryScheduleAsync(
+        long draftId, DateTime scheduledForUtc, long userId, string? userName, CancellationToken ct)
+    {
+        using var connection = await db.OpenAsync(ct);
+        using var transaction = connection.BeginTransaction();
+
+        var rows = await connection.ExecuteAsync(
+            """
+            UPDATE dbo.nw_Draft
+            SET Status = @approvedStatus, ScheduledForUtc = @scheduledForUtc,
+                UpdatedAtUtc = SYSUTCDATETIME()
+            WHERE Id = @draftId AND Status = @pendingStatus
+            """,
+            new
+            {
+                draftId,
+                scheduledForUtc,
+                approvedStatus = nameof(DraftStatus.Approved),
+                pendingStatus = nameof(DraftStatus.PendingReview),
+            },
+            transaction);
+        if (rows == 0)
+            return false; // not PendingReview (double-tap or stale button); transaction rolls back
+
+        await InsertReviewActionAsync(connection, transaction, draftId, userId, userName,
+            "Scheduled", scheduledForUtc.ToString("O", CultureInfo.InvariantCulture));
+
+        transaction.Commit();
+        return true;
+    }
+
+    public async Task<bool> TryUnscheduleAsync(
+        long draftId, long userId, string? userName, CancellationToken ct)
+    {
+        using var connection = await db.OpenAsync(ct);
+        using var transaction = connection.BeginTransaction();
+
+        var rows = await connection.ExecuteAsync(
+            """
+            UPDATE dbo.nw_Draft
+            SET ScheduledForUtc = NULL, UpdatedAtUtc = SYSUTCDATETIME()
+            WHERE Id = @draftId AND Status = @approvedStatus AND ScheduledForUtc IS NOT NULL
+            """,
+            new { draftId, approvedStatus = nameof(DraftStatus.Approved) },
+            transaction);
+        if (rows == 0)
+            return false; // not scheduled (or already published); transaction rolls back
+
+        await InsertReviewActionAsync(connection, transaction, draftId, userId, userName,
+            "ScheduleOverridden", comment: null);
+
+        transaction.Commit();
+        return true;
+    }
+
+    public async Task<IReadOnlyList<DateTime>> GetFacebookCommitmentsUtcAsync(
+        DateTime fromUtc, CancellationToken ct)
+    {
+        using var connection = await db.OpenAsync(ct);
+        var rows = await connection.QueryAsync<DateTime>(
+            """
+            SELECT p.AtUtc FROM dbo.nw_PublishRecord p
+            WHERE p.Destination = @facebook AND p.Status = @succeededStatus AND p.AtUtc >= @fromUtc
+            UNION ALL
+            SELECT d.ScheduledForUtc FROM dbo.nw_Draft d
+            WHERE d.Status = @approvedStatus AND d.ScheduledForUtc IS NOT NULL
+              AND d.ScheduledForUtc >= @fromUtc
+            """,
+            new
+            {
+                fromUtc,
+                facebook = PublishDestinations.Facebook,
+                succeededStatus = PublishSucceededStatus,
+                approvedStatus = nameof(DraftStatus.Approved),
+            });
+        return rows.ToList();
     }
 
     public async Task<IReadOnlyList<(long DraftId, long? MessageId)>> ExpireStaleAsync(
