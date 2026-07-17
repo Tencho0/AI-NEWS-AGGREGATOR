@@ -222,12 +222,14 @@ public sealed class DraftRepository(IDbConnectionFactory db) : IDraftRepository
             INSERT INTO dbo.nw_Draft
                 (TopicId, Version, Status, Headline, Subtitle, BodyMarkdown, Category, Region,
                  TagsJson, SeoTitle, SeoDescription, SourcesJson, FlaggedClaimsJson, Confidence,
-                 ImageAltTextBg, PromptVersion, Provider, Model, TokensIn, TokensOut, Cost)
+                 ImageAltTextBg, PromptVersion, Provider, Model, TokensIn, TokensOut, Cost,
+                 FacebookCaption, FacebookHashtagsJson)
             OUTPUT INSERTED.Id
             SELECT @topicId, ISNULL(MAX(d.Version), 0) + 1, @status, @headline, @subtitle,
                    @bodyMarkdown, @category, @region, @tagsJson, @seoTitle, @seoDescription,
                    @sourcesJson, @flaggedClaimsJson, @confidence, @imageAltTextBg,
-                   @promptVersion, @provider, @model, @tokensIn, @tokensOut, @cost
+                   @promptVersion, @provider, @model, @tokensIn, @tokensOut, @cost,
+                   @facebookCaption, @facebookHashtagsJson
             FROM dbo.nw_Draft d
             WHERE d.TopicId = @topicId
             """,
@@ -253,6 +255,12 @@ public sealed class DraftRepository(IDbConnectionFactory db) : IDraftRepository
                 tokensIn = usage.TokensIn,
                 tokensOut = usage.TokensOut,
                 cost = usage.Cost,
+                facebookCaption = string.IsNullOrWhiteSpace(content.FacebookCaption)
+                    ? null
+                    : Truncate(content.FacebookCaption, 1200),
+                facebookHashtagsJson = content.FacebookHashtags.Count == 0
+                    ? null
+                    : JsonSerializer.Serialize(content.FacebookHashtags, JsonOptions),
             },
             transaction);
 
@@ -352,7 +360,9 @@ public sealed class DraftRepository(IDbConnectionFactory db) : IDraftRepository
                 SourcesJson = @sourcesJson, FlaggedClaimsJson = @flaggedClaimsJson,
                 Confidence = @confidence, ImageAltTextBg = @imageAltTextBg,
                 PromptVersion = @promptVersion, Provider = @provider, Model = @model,
-                TokensIn = @tokensIn, TokensOut = @tokensOut, Cost = @cost, Error = NULL,
+                TokensIn = @tokensIn, TokensOut = @tokensOut, Cost = @cost,
+                FacebookCaption = @facebookCaption, FacebookHashtagsJson = @facebookHashtagsJson,
+                Error = NULL,
                 TelegramMessageId = NULL, PostedAtUtc = NULL, UpdatedAtUtc = SYSUTCDATETIME()
             WHERE Id = @draftId
             """,
@@ -378,6 +388,12 @@ public sealed class DraftRepository(IDbConnectionFactory db) : IDraftRepository
                 tokensIn = usage.TokensIn,
                 tokensOut = usage.TokensOut,
                 cost = usage.Cost,
+                facebookCaption = string.IsNullOrWhiteSpace(content.FacebookCaption)
+                    ? null
+                    : Truncate(content.FacebookCaption, 1200),
+                facebookHashtagsJson = content.FacebookHashtags.Count == 0
+                    ? null
+                    : JsonSerializer.Serialize(content.FacebookHashtags, JsonOptions),
             },
             transaction);
 
