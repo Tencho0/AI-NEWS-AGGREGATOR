@@ -158,4 +158,35 @@ public class ReviewMessageRendererTests
 
         Assert.DoesNotContain("📎", html);
     }
+
+    [Fact]
+    public void Renders_the_facebook_caption_block_when_present()
+    {
+        var view = new DraftReviewView(
+            DraftId: 7, Version: 1, TopicLabel: "Тема", TopicScore: 6.5, SourceCount: 2,
+            Headline: "ЗАГЛАВИЕ", Subtitle: null, BodyMarkdown: "Текст на статията.",
+            Category: "Общество", Region: "Благоевград", Tags: [],
+            Sources: [], FlaggedClaims: [], Confidence: 0.8, Cost: 0.001m, Model: "gemini",
+            ImageCount: 0, TelegramMessageId: null, IsManual: false,
+            FacebookCaption: "Кука на поста.\n\nОще факти за събитието.\n\nКакво мислите?",
+            FacebookHashtags: ["#Благоевград", "#ПределНюз"]);
+
+        var html = ReviewMessageRenderer.RenderHtml(view);
+
+        Assert.Contains("📘 Facebook:", html);
+        Assert.Contains("Кука на поста.", html);
+        Assert.Contains("#Благоевград #ПределНюз", html);
+    }
+
+    [Fact]
+    public void Skips_the_facebook_block_when_the_draft_has_no_caption()
+    {
+        var view = new DraftReviewView(
+            DraftId: 7, Version: 1, TopicLabel: "Тема", TopicScore: 6.5, SourceCount: 2,
+            Headline: "ЗАГЛАВИЕ", Subtitle: null, BodyMarkdown: "Текст.", Category: "Общество",
+            Region: null, Tags: [], Sources: [], FlaggedClaims: [], Confidence: null,
+            Cost: 0m, Model: null, ImageCount: 0, TelegramMessageId: null);
+
+        Assert.DoesNotContain("📘 Facebook:", ReviewMessageRenderer.RenderHtml(view));
+    }
 }

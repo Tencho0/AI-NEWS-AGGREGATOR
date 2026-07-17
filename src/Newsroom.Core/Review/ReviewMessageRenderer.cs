@@ -48,6 +48,14 @@ public static class ReviewMessageRenderer
             html.Append('\n');
         }
 
+        if (!string.IsNullOrWhiteSpace(v.FacebookCaption))
+        {
+            html.Append('\n').Append("📘 Facebook:").Append('\n')
+                .Append(Escape(v.FacebookCaption)).Append('\n');
+            if (v.FacebookHashtags is { Count: > 0 } hashtags)
+                html.Append(Escape(string.Join(" ", hashtags))).Append('\n');
+        }
+
         if (v.Sources.Count > 0)
         {
             html.Append("🔗 Източници:").Append('\n');

@@ -25,4 +25,6 @@ public sealed record DraftReviewView(
     string? Model,
     int ImageCount,
     long? TelegramMessageId,
-    bool IsManual = false);
+    bool IsManual = false,
+    string? FacebookCaption = null,
+    IReadOnlyList<string>? FacebookHashtags = null);
