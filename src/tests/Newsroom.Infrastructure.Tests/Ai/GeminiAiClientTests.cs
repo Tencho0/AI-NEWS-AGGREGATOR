@@ -1,3 +1,7 @@
+using BlockedReason = Google.GenAI.Types.BlockedReason;
+using GenerateContentResponse = Google.GenAI.Types.GenerateContentResponse;
+using GenerateContentResponsePromptFeedback = Google.GenAI.Types.GenerateContentResponsePromptFeedback;
+
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
 using Newsroom.Core.Ai;
@@ -12,13 +16,14 @@ public class GeminiAiClientTests
 
     private static (GeminiAiClient Client, FakeChatClient Fake) CreateClient(
         string responseText, UsageDetails? usage = null, GeminiAiOptions? options = null,
-        ChatFinishReason? finishReason = null)
+        ChatFinishReason? finishReason = null, object? rawRepresentation = null)
     {
         var response = new ChatResponse(new ChatMessage(ChatRole.Assistant, responseText))
         {
             Usage = usage,
             ModelId = "gemini-2.5-flash",
             FinishReason = finishReason,
+            RawRepresentation = rawRepresentation,
         };
         var fake = new FakeChatClient(response);
         var client = new GeminiAiClient(fake, options ?? new GeminiAiOptions(),
@@ -126,9 +131,9 @@ public class GeminiAiClientTests
     [Fact]
     public async Task Empty_response_throws_AiEmptyResponseException_with_finish_reason()
     {
-        // Observed under provider load: HTTP 200 with an empty completion (the 200-shaped sibling
-        // of the 503 "high demand" error). Must be distinguishable from malformed JSON so jobs
-        // classify it as transient instead of burning the batch's attempt budget.
+        // HTTP 200 with an empty completion must be distinguishable from malformed JSON, and the
+        // finish reason must be carried so AiTransientErrors can classify it (content_filter →
+        // permanent, burns the attempt; load-shaped → transient, retried).
         var (client, _) = CreateClient("", finishReason: ChatFinishReason.ContentFilter);
 
         var ex = await Assert.ThrowsAsync<AiEmptyResponseException>(
@@ -136,6 +141,42 @@ public class GeminiAiClientTests
 
         Assert.Contains("empty completion", ex.Message);
         Assert.Equal("content_filter", ex.FinishReason); // diagnosable, e.g. a SAFETY block
+    }
+
+    [Fact]
+    public async Task Prompt_blocked_empty_response_carries_the_block_reason()
+    {
+        // Gemini can refuse the whole prompt (promptFeedback.blockReason, e.g. PROHIBITED_CONTENT):
+        // HTTP 200, no candidates, so the adapter yields empty text and a null finish reason.
+        // Unlike a load-shaped empty this is deterministic for the same batch (the 2026-07-16
+        // Analyse stall), so the block reason must be carried for classification and the log.
+        var raw = new GenerateContentResponse
+        {
+            PromptFeedback = new GenerateContentResponsePromptFeedback
+            {
+                BlockReason = BlockedReason.ProhibitedContent,
+            },
+        };
+        var (client, _) = CreateClient("", rawRepresentation: raw);
+
+        var ex = await Assert.ThrowsAsync<AiEmptyResponseException>(
+            () => client.SummariseAndClassifyAsync([Article(1)], CancellationToken.None));
+
+        Assert.Equal("PROHIBITED_CONTENT", ex.BlockReason);
+        Assert.Contains("PROHIBITED_CONTENT", ex.Message); // the real reason, not "unknown"
+    }
+
+    [Fact]
+    public async Task Empty_response_without_prompt_feedback_has_no_block_reason()
+    {
+        // A load-shaped empty (raw response present but no promptFeedback) must stay
+        // distinguishable from a block, so it keeps its transient classification.
+        var (client, _) = CreateClient("", rawRepresentation: new GenerateContentResponse());
+
+        var ex = await Assert.ThrowsAsync<AiEmptyResponseException>(
+            () => client.SummariseAndClassifyAsync([Article(1)], CancellationToken.None));
+
+        Assert.Null(ex.BlockReason);
     }
 
     [Fact]

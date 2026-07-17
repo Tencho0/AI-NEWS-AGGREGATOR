@@ -12,6 +12,26 @@ public class AiTransientErrorsTests
         Assert.True(AiTransientErrors.IsTransient(new AiEmptyResponseException("analysis batch", "stop")));
     }
 
+    [Fact]
+    public void Prompt_blocked_empty_completion_is_not_transient()
+    {
+        // promptFeedback.blockReason (e.g. PROHIBITED_CONTENT) is deterministic for the same
+        // batch: treating it as transient re-fetched and re-blocked the identical oldest-first
+        // batch forever and froze the Analyse queue (2026-07-16). Burning the attempt lets
+        // poison protection mark the articles Ignored and the queue drain.
+        Assert.False(AiTransientErrors.IsTransient(
+            new AiEmptyResponseException("analysis batch", null, "PROHIBITED_CONTENT")));
+    }
+
+    [Fact]
+    public void Content_filtered_empty_completion_is_not_transient()
+    {
+        // A candidate-level safety block (finishReason=SAFETY → content_filter) is the same
+        // permanent, content-determined refusal as a prompt block — only reported one level lower.
+        Assert.False(AiTransientErrors.IsTransient(
+            new AiEmptyResponseException("analysis batch", "content_filter")));
+    }
+
     [Theory]
     [InlineData("You exceeded your current quota, please check your plan and billing details.")]
     [InlineData("Error 429: RESOURCE_EXHAUSTED")]
