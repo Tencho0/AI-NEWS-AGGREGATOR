@@ -337,7 +337,18 @@ public sealed class TelegramJob(
     private async Task ScheduleDraftAsync(
         TgCallback callback, long draftId, string editor, CancellationToken ct)
     {
-        var slotLocal = await SuggestSlotAsync(ct);
+        DateTime slotLocal;
+        try
+        {
+            slotLocal = await SuggestSlotAsync(ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Could not compute the publish slot for draft {DraftId}; schedule press ignored", draftId);
+            await AnswerBestEffortAsync(callback.CallbackId, "Грешка — опитай пак", ct);
+            return;
+        }
+
         var scheduled = await reviews.TryScheduleAsync(
             draftId, slotLocal.ToUniversalTime(), callback.UserId, callback.UserName, ct);
         if (!scheduled)
