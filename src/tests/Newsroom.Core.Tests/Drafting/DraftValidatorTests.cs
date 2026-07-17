@@ -227,7 +227,14 @@ public class DraftValidatorTests
 
 public class DraftNormalizerTests
 {
-    private static readonly string NormalizerValidCaption = "Тестова подпис с валиден тестов текст.";
+    /// <summary>~330 chars, same shape as DraftValidatorTests.ValidCaption: short sentence-case
+    /// hook line, facts paragraph, closing question — passes every caption gate (200–900 total,
+    /// first line ≤ 120, no markers, mostly lowercase).</summary>
+    private static readonly string NormalizerValidCaption =
+        "Общината обяви нови мерки за контрол.\n\n"
+        + string.Concat(Enumerable.Repeat(
+            "Промените влизат в сила от понеделник и засягат центъра на града. ", 4))
+        + "\nКакво мислите за промените?";
 
     private static Newsroom.Core.Drafting.DraftContent Draft(string seoTitle, string seoDescription) => new(
         Headline: "ЗАГЛАВИЕ",

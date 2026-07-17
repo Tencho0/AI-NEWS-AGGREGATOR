@@ -33,15 +33,20 @@ public static class DraftValidator
 
     /// <summary>Repairs safely-fixable hashtag issues: missing leading '#', duplicates (case-
     /// insensitive), blanks, overflow beyond the cap. Malformed characters are NOT repaired —
-    /// Validate flags those (a mangled hashtag is a content problem, not a cosmetic one).</summary>
-    private static IReadOnlyList<string> NormalizeHashtags(IReadOnlyList<string> hashtags) =>
-        hashtags
+    /// Validate flags those (a mangled hashtag is a content problem, not a cosmetic one).
+    /// Returns the input list itself when it is already normalized, so Normalize stays an
+    /// identity operation on compliant drafts (record equality included).</summary>
+    private static IReadOnlyList<string> NormalizeHashtags(IReadOnlyList<string> hashtags)
+    {
+        var normalized = hashtags
             .Select(h => h.Trim().TrimStart('#'))
             .Where(h => h.Length > 0)
             .Select(h => "#" + h)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(MaxFacebookHashtags)
             .ToList();
+        return normalized.SequenceEqual(hashtags, StringComparer.Ordinal) ? hashtags : normalized;
+    }
 
     private static string TruncateAtWordBoundary(string value, int maxChars)
     {
