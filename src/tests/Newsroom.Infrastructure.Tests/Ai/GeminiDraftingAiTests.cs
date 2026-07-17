@@ -20,7 +20,9 @@ public class GeminiDraftingAiTests
           "imageSearchQueries": ["earthquake damage", "seismograph"],
           "imageAltTextBg": "Сеизмограф записва трус",
           "flaggedClaims": ["Магнитудът от 4.5 идва само от един източник."],
-          "confidence": 0.85
+          "confidence": 0.85,
+          "facebookCaption": "Земетресение разлюля Югозапада тази сутрин.\n\nТрусът е усетен в Благоевград и района, съобщи БТА. Няма данни за пострадали и щети по сградите.\n\nВие усетихте ли труса? Разкажете ни в коментарите.",
+          "facebookHashtags": ["#Благоевград", "#Земетресение"]
         }
         """;
 
@@ -37,7 +39,7 @@ public class GeminiDraftingAiTests
     private static DraftContent Draft() => new(
         "МОЩЕН ТРУС РАЗТЪРСИ ЮГОЗАПАДА", null, "Земетресение разтърси региона.", "Общество",
         "Благоевград", ["земетресение"], "Трус в Югозапада", "Земетресение в региона.",
-        ["earthquake"], null, [], 0.85);
+        ["earthquake"], null, [], 0.85, "", []);
 
     private static (GeminiDraftingAi Client, FakeChatClient DraftFake, FakeChatClient SelfCheckFake) CreateClient(
         string draftResponseText, string selfCheckResponseText = """{"unsupportedClaims": []}""",
@@ -81,6 +83,8 @@ public class GeminiDraftingAiTests
         Assert.Equal("Сеизмограф записва трус", content.ImageAltTextBg);
         Assert.Single(content.FlaggedClaims);
         Assert.Equal(0.85, content.Confidence);
+        Assert.StartsWith("Земетресение разлюля Югозапада", content.FacebookCaption);
+        Assert.Equal(["#Благоевград", "#Земетресение"], content.FacebookHashtags);
 
         Assert.Equal("gemini", result.Usage.Provider);
         Assert.Equal("gemini-2.5-flash", result.Usage.Model);
@@ -150,6 +154,8 @@ public class GeminiDraftingAiTests
         Assert.Empty(result.Content.Tags);
         Assert.Empty(result.Content.ImageSearchQueries);
         Assert.Equal(0, result.Content.Confidence);
+        Assert.Equal("", result.Content.FacebookCaption);
+        Assert.Empty(result.Content.FacebookHashtags);
         Assert.Equal(0, result.Usage.TokensIn);       // no usage metadata → 0, cost 0
         Assert.Equal(0m, result.Usage.Cost);
     }

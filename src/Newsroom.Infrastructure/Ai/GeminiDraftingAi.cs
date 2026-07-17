@@ -204,7 +204,9 @@ public sealed class GeminiDraftingAi(
             CleanList(dto.ImageSearchQueries),
             NullIfWhiteSpace(dto.ImageAltTextBg),
             CleanList(dto.FlaggedClaims),
-            dto.Confidence ?? 0);
+            dto.Confidence ?? 0,
+            dto.FacebookCaption?.Trim() ?? "",
+            CleanList(dto.FacebookHashtags));
     }
 
     private static IReadOnlyList<string> ParseSelfCheck(string text)
@@ -247,7 +249,9 @@ public sealed class GeminiDraftingAi(
         List<string?>? ImageSearchQueries,
         string? ImageAltTextBg,
         List<string?>? FlaggedClaims,
-        double? Confidence);
+        double? Confidence,
+        string? FacebookCaption,
+        List<string?>? FacebookHashtags);
 
     /// <summary>Wire shape of the model's self-check JSON object.</summary>
     private sealed record SelfCheckDto(List<string?>? UnsupportedClaims);

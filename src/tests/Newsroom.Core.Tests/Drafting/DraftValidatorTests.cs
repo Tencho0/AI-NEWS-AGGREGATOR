@@ -24,7 +24,9 @@ public class DraftValidatorTests
         ImageSearchQueries: ["city hall bulgaria", "municipal building"],
         ImageAltTextBg: "Сградата на общината в Благоевград",
         FlaggedClaims: [],
-        Confidence: 0.8);
+        Confidence: 0.8,
+        FacebookCaption: "",
+        FacebookHashtags: []);
 
     private static IReadOnlyList<string> Validate(DraftContent draft) =>
         DraftValidator.Validate(draft, Categories, Regions, Options);
@@ -165,7 +167,9 @@ public class DraftNormalizerTests
         ImageSearchQueries: ["city hall"],
         ImageAltTextBg: null,
         FlaggedClaims: [],
-        Confidence: 0.9);
+        Confidence: 0.9,
+        FacebookCaption: "",
+        FacebookHashtags: []);
 
     [Fact]
     public void Normalize_truncates_overlong_seo_fields_at_word_boundary()

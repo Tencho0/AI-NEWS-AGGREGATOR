@@ -17,4 +17,6 @@ public sealed record DraftContent(
     IReadOnlyList<string> ImageSearchQueries,
     string? ImageAltTextBg,
     IReadOnlyList<string> FlaggedClaims,
-    double Confidence);
+    double Confidence,
+    string FacebookCaption,
+    IReadOnlyList<string> FacebookHashtags);
