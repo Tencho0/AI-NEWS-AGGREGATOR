@@ -1,6 +1,6 @@
 # Integration — Telegram Review Bot
 
-**Status:** Draft · **Last updated:** 2026-07-13 · **ADR:** 0006
+**Status:** Draft · **Last updated:** 2026-07-17 · **ADR:** 0006
 
 ## Approach
 
@@ -31,18 +31,28 @@ One message per draft version:
 <body — first ~1500 chars; full text attached as .md file if longer>
 
 📎 Категория: <…> · Регион: <…> · Тагове: <…>
+
+📘 Facebook:
+<caption — sentence-case hook, 1–2 short paragraphs, closing question/CTA>
+<#хаштаг #хаштаг #хаштаг>
+
 🔗 Източници: <numbered links>
 ⚠️ За проверка: <flagged claims, if any>
 💰 <cost> · v<version> · модел <model>
 ```
 + photo message with the top image suggestion (attribution in caption)
 + inline keyboard: ✅ Одобри · ✏️ Промени · 🖼 Друга снимка · ❌ Откажи
++ second keyboard row: 📅 Насрочи {HH:mm} (present whenever a suggested slot could be computed)
 
 Editor-authored drafts (`/post`, `/new`) render a different header: `✍️ <topic label>
 (редакторска)` instead of `🔥 … (score …, N източника)` — there is no trend score or scraped
 source count to show. The `📎` meta line is omitted entirely when the draft has no
 category/region/tags (always true for verbatim `/post` drafts, which carry no AI-suggested
 metadata); it still appears normally on `/new` drafts once the AI pipeline fills those fields.
+The `📘 Facebook:` block likewise only appears when the draft carries a caption
+(`nw_Draft.FacebookCaption`, prompt `draft-v2`+) — it shows the editor exactly what the Facebook
+post will say, hashtags included; verbatim `/post` drafts and legacy drafts have no caption and
+skip the block.
 
 ## Interaction rules
 
@@ -53,6 +63,14 @@ metadata); it still appears normally on `/new` drafts once the AI pipeline fills
   New version posted as a fresh message; old message's keyboard is removed.
 - 🖼: edits the photo message to the next suggestion; an editor photo-upload reply overrides
   suggestions (stored as `editor-upload`, wins selection).
+- 📅 **Насрочи {HH:mm}** (second keyboard row): approves the draft for the suggested slot (the
+  label is advisory; the slot is recomputed at press time in case the card has gone stale).
+  Confirmation edits the card to „📅 Насрочено за {дд.MM HH:mm} от {editor}“;
+  `nw_ReviewAction.Action = 'Scheduled'` (comment = the UTC slot). If the slot cannot be computed
+  (e.g. a bad `Facebook:Schedule` config), the press is a no-op and the editor gets a "Грешка —
+  опитай пак" toast. ✅ pressed on an already-scheduled draft publishes immediately instead of
+  honouring the slot (`Action = 'ScheduleOverridden'`) — one more guarded transition alongside
+  approve/reject/change-request.
 - After approve/reject, the message is edited to show final state + (on publish) live links.
 - All state transitions via the bot are recorded in `nw_ReviewAction` (user id, action, time).
 
@@ -71,7 +89,7 @@ each command's response is in [`TelegramJob`](../../src/Newsroom.Worker/Jobs/Tel
 | `/topics` | Lists the top tracked topics. |
 | `/quota` | AI requests used vs the daily per-stage cap today. |
 | `/health` | Last heartbeat per background job, with a staleness marker. |
-| `/help` | Prints the command list. |
+| `/help` | Prints the command list, including the per-card actions (now mentions 📅 alongside ✅/✏️/🖼/❌). |
 | `/mute <topicId> [hours]` | Silences one topic. `hours` is optional and **defaults to 24**; e.g. `/mute 42` or `/mute 42 6`. Replies with confirmation or "няма такава тема" if the id is unknown. |
 | `/unmute <topicId>` | Lifts a topic mute early (reverse of `/mute`). |
 | `/pause` | Stops **draft generation** (runtime flag `Draft:Paused` in `nw_Config`). Scraping and analysis keep running. |
@@ -89,7 +107,8 @@ replies to the review card:
 
 | Action | Trigger | Effect |
 |---|---|---|
-| Approve | ✅ button | Publishes the draft. |
+| Approve | ✅ button | Publishes the draft; on an already-scheduled draft, clears the schedule and publishes instead. |
+| Schedule | 📅 button | Approves the draft gated on the suggested publish slot (recomputed at press time). |
 | Reject | ❌ button | Discards the draft. |
 | Request changes | ✏️ button, then a text reply | Opens a pending conversation; the next message becomes regeneration instructions. |
 | Cycle image | 🖼 button | Shows the next stock image suggestion. |
