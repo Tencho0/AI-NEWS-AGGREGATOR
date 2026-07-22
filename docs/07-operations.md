@@ -35,6 +35,9 @@ new ADR — deliberately out of v1.
 2. **Retry taxonomy:**
    - *Transient* (HTTP 5xx/429/timeouts): Polly retry ×3 exponential+jitter, then circuit breaker
      per host; item stays queued for next cycle.
+   - *Gemini daily-quota 429:* Cluster/Draft/SelfCheck switch to the Analyse stage's model until
+     the quota reset (midnight US-Pacific), then switch back — automatic, in-memory, Gemini-only
+     (docs/05-integrations/ai-generation.md § Daily-quota fallback; mitigates risk R-11).
    - *Permanent* (4xx validation, schema failures): mark failed immediately + alert; no retry
      without human action.
    - *Poison items:* 3 failed cycles → status `*Failed`, excluded from queues, alerted.

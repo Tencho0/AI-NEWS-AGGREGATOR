@@ -34,19 +34,19 @@ Facts as of 2026-07 (indicative — the authoritative live numbers are in the
 | Constraint | Value | Design consequence |
 |---|---|---|
 | Models on free tier | **Flash tier only** (Pro is paid-only since 2026-04) | All stages start on the current Flash model; drafting quality gate decides upgrades |
-| Rate limits | RPM throttled client-side (shared `AiRateLimiter`, `Ai:RequestsPerMinute`); **RPD ≈ 20/day _per model_** on this project — observed 2026-07-10, far below the ~1,500 general figure (see *Free-tier limitations* below) | One model per stage so each gets its own daily bucket; jobs queue on 429, never drop |
+| Rate limits | RPM throttled client-side (shared `AiRateLimiter`, `Ai:RequestsPerMinute`); **RPD ≈ 20/day _per model_** on this project (exception: `gemini-3.1-flash-lite`, 500 — see *Free-tier limitations* below) — observed 2026-07-10, far below the ~1,500 general figure | One model per stage so each gets its own daily bucket; jobs queue on 429, never drop |
 | Batch API | Not on free tier | Batch by **packing** N articles into one analysis request instead |
 | Data usage | Free-tier content may be used by Google to improve products | Only public news content is sent — never secrets/credentials/personal data (06-security.md) |
 | SLA | None | Retries + graceful degradation are mandatory (below) |
 
-### Models per stage (current config, 2026-07-10)
+### Models per stage (current config, 2026-07-21)
 
 Provider+model are per-stage config (`Ai:Stages:{stage}:Model`); these are the values live in
 `src/Newsroom.Worker/appsettings.json`:
 
 | Stage | Model | Batch | Why this model |
 |---|---|---|---|
-| **Analyse** (summarise/classify) | `gemini-2.5-flash-lite` | 8 articles/request | Highest volume; classification tolerates a lighter model. Own daily bucket. |
+| **Analyse** (summarise/classify) | `gemini-3.1-flash-lite` | 8 articles/request | Highest volume; classification tolerates a lighter model. Own daily bucket (500 RPD). Also the daily-quota fallback model for the other stages (below). |
 | **Cluster** (trend grouping) | `gemini-2.5-flash` | 30 candidates/request | Own daily bucket so a scraping burst on Analyse can't starve it. |
 | **Draft** (article generation) | `gemini-3.5-flash` | 1 topic/request | Newest/strongest flash — drafting is the quality-critical Bulgarian generation. |
 | **SelfCheck** (claim verification) | `gemini-3.5-flash` | 1 draft/request | Low volume; shares Draft's bucket. |
@@ -57,26 +57,47 @@ draw from a single ~20/day allowance (they starve each other); give each bulk st
 and each gets its own allowance. Analyse and Cluster each get a dedicated model; Draft + SelfCheck
 (both low volume) share one. Model ids are config — re-tune as the Gemini catalog and quotas move.
 
-### Free-tier limitations (observed on this project, 2026-07-10)
+### Daily-quota fallback (2026-07-21)
+
+When Cluster, Draft, or SelfCheck gets a **daily**-quota 429 from Gemini (a quota id naming
+`…PerDay…` — per-minute 429s keep the normal retry-next-cycle path), the stage automatically
+switches to the Analyse stage's model until the quota reset (midnight US-Pacific), then switches
+back. Implemented as a delegating `IChatClient` (`GeminiQuotaFallbackChatClient` +
+`GeminiModelFallback` state) so jobs and adapters are untouched; the triggering request is
+retried once on the fallback model, and `nw_CostLedger.Model` records the model actually used.
+State is per **model**, so Draft and SelfCheck (same model) flip together; it is in-memory, so a
+worker restart merely re-probes the primary (worst case: one extra 429 re-activates).
+
+**Gemini-only:** a stage whose `Ai:Stages:{stage}:Provider` is not `gemini` (absent = `gemini`,
+ADR-0010) is never wrapped, and the Analyse fallback target must be Gemini too — the fallback can
+never switch a Claude/OpenAI stage's model. Stage `DailyRequestBudget`s still apply, so worst
+case on the Analyse model is 450 + 18 + 9 + 9 = 486 requests/day, inside its 500 RPD.
+
+### Free-tier limitations (observed on this project, 2026-07-10; updated 2026-07-21)
 
 The general Gemini figures (~15 RPM / ~1,500 RPD) do **not** apply here. Measured against live
 429s and the AI Studio quota:
 
-- **~20 `generateContent` requests/day, per model** on the free tier — confirmed on
-  `gemini-2.5-flash`, `gemini-3.5-flash`, and `gemini-2.5-flash-lite` (all report
-  `limit: 20`, quota id `GenerateRequestsPerDayPerProjectPerModel-FreeTier`).
+- **~20 `generateContent` requests/day, per model** on the free tier for most text models —
+  confirmed on `gemini-2.5-flash`, `gemini-3.5-flash`, and `gemini-2.5-flash-lite` (all report
+  `limit: 20`, quota id `GenerateRequestsPerDayPerProjectPerModel-FreeTier`). The exception is
+  **`gemini-3.1-flash-lite` at 500/day** (AI Studio dashboard) — which is why Analyse runs it
+  and why it doubles as the daily-quota fallback target.
 - **`gemini-2.0-flash` / `gemini-2.0-flash-lite` have _zero_ free quota** (`limit: 0`) — they
   appear in the model list but cannot be used free; never assign a stage to them.
 - Quota **resets at midnight US-Pacific** (~10:00 Europe/Sofia).
-- Only ~3 flash models are usable and each is ~20/day, so the whole free tier tops out at
-  **~60 AI requests/day total**. With batch packing that is roughly **160 articles/day** of
-  analysis + **600 clustering candidates/day** + **~10 draft cycles/day** — enough to chip away at
-  backlogs, **not** enough to keep up with continuous scraping in real time.
+- With `gemini-3.1-flash-lite` on Analyse the free tier no longer tops out at ~60 requests/day:
+  Analyse alone has 500/day (budgeted 450 — up to ~3,600 analysed articles/day at 8 per
+  request), while Cluster and Draft/SelfCheck stay on ~20/day models (budgets 18 and 9+9 —
+  ~540 clustering candidates/day, ~9 draft cycles/day). Cluster and Draft remain the scarce
+  buckets; the daily-quota fallback (above) borrows Analyse's headroom when they run dry.
 - On quota exhaustion a stage logs `AI temporarily unavailable … will retry later` and resumes
   after the reset; no work is lost (the item's attempt is not burned — see
-  `AiTransientErrors.IsQuotaExhausted`).
-- **The only way past ~20/day/model is enabling billing** (paid tier) — negligible cost at this
-  volume, and the primary remedy for risk R-11.
+  `AiTransientErrors.IsQuotaExhausted`). On a **daily**-quota 429, Cluster/Draft/SelfCheck do
+  not wait: they fall back to the Analyse model automatically ("Daily-quota fallback" above).
+- **The only way to raise a model's own ~20/day cap is enabling billing** (paid tier) —
+  negligible cost at this volume, and the primary remedy for risk R-11. The daily-quota
+  fallback does not raise any cap — it only borrows Analyse's separate 500/day bucket.
 
 Re-verify current limits in AI Studio → <https://aistudio.google.com/rate-limit> (per project), or
 list the models a key can use via `GET https://generativelanguage.googleapis.com/v1beta/models?key=…`
