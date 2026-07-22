@@ -46,4 +46,23 @@ public class AiTransientErrorsTests
     public void Ordinary_failures_are_not_transient() =>
         Assert.False(AiTransientErrors.IsTransient(
             new InvalidOperationException("AI returned malformed JSON for the analysis batch: oops")));
+
+    [Theory]
+    [InlineData("Error 429: RESOURCE_EXHAUSTED. Quota exceeded for quota id: GenerateRequestsPerDayPerProjectPerModel-FreeTier.")]
+    [InlineData("You exceeded your current quota: 20 requests per day for this model.")]
+    public void Daily_quota_wordings_are_daily_exhaustion(string message)
+    {
+        var ex = new InvalidOperationException(message);
+        Assert.True(AiTransientErrors.IsDailyQuotaExhausted(ex));
+        Assert.True(AiTransientErrors.IsTransient(ex)); // still transient for job-level catches
+    }
+
+    [Theory]
+    [InlineData("Error 429: RESOURCE_EXHAUSTED. Quota exceeded for quota id: GenerateRequestsPerMinutePerProjectPerModel-FreeTier.")]
+    [InlineData("Error 429: RESOURCE_EXHAUSTED")]
+    [InlineData("The model is overloaded. Please try again later.")]
+    [InlineData("HTTP 503 Service Unavailable")]
+    [InlineData("AI returned malformed JSON for the analysis batch: oops")]
+    public void Non_daily_failures_are_not_daily_exhaustion(string message) =>
+        Assert.False(AiTransientErrors.IsDailyQuotaExhausted(new InvalidOperationException(message)));
 }

@@ -73,6 +73,8 @@ try
     // skipped stage (the jobs guard on key presence) instead of failing host startup. One
     // AiRateLimiter is shared by all stages: the free-tier RPM cap is per key, not per stage.
     builder.Services.AddSingleton(_ => AiRateLimiter.From(builder.Configuration));
+    builder.Services.AddSingleton(TimeProvider.System);
+    builder.Services.AddSingleton<GeminiModelFallback>(); // daily-quota fallback state, per model
     builder.Services.AddSingleton<IAiBudget, AiBudget>();
     builder.Services.AddSingleton<IAnalysisRepository, AnalysisRepository>();
     builder.Services.AddSingleton(provider => new Lazy<IAiClient>(() => new GeminiAiClient(
@@ -84,7 +86,8 @@ try
     // Trend detection (docs/02-functional-spec.md §3): clustering + scoring over nw_Topic.
     builder.Services.AddSingleton<ITopicRepository, TopicRepository>();
     builder.Services.AddSingleton(provider => new Lazy<IClusteringAi>(() => new GeminiClusteringAi(
-        GeminiChatClientFactory.Create(builder.Configuration, "Cluster"),
+        GeminiChatClientFactory.CreateWithDailyQuotaFallback(builder.Configuration, "Cluster",
+            provider.GetRequiredService<GeminiModelFallback>()),
         GeminiClusteringOptions.From(builder.Configuration),
         provider.GetRequiredService<AiRateLimiter>(),
         provider.GetRequiredService<ILogger<GeminiClusteringAi>>())));
@@ -93,8 +96,10 @@ try
     // Lazy pattern, plus stock-image suggestions over a shared resilient HttpClient.
     builder.Services.AddSingleton<IDraftRepository, DraftRepository>();
     builder.Services.AddSingleton(provider => new Lazy<IDraftingAi>(() => new GeminiDraftingAi(
-        GeminiChatClientFactory.Create(builder.Configuration, "Draft"),
-        GeminiChatClientFactory.Create(builder.Configuration, "SelfCheck"),
+        GeminiChatClientFactory.CreateWithDailyQuotaFallback(builder.Configuration, "Draft",
+            provider.GetRequiredService<GeminiModelFallback>()),
+        GeminiChatClientFactory.CreateWithDailyQuotaFallback(builder.Configuration, "SelfCheck",
+            provider.GetRequiredService<GeminiModelFallback>()),
         GeminiDraftingOptions.From(builder.Configuration),
         provider.GetRequiredService<AiRateLimiter>())));
 
