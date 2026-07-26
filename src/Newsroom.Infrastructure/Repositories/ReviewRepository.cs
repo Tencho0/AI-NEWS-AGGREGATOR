@@ -37,7 +37,12 @@ public sealed class ReviewRepository(IDbConnectionFactory db, IConfiguration con
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    /// <summary>Shared projection for <see cref="DraftReviewView"/> (see <see cref="ReviewRow"/>).</summary>
+    /// <summary>
+    /// Shared projection for <see cref="DraftReviewView"/> (see <see cref="ReviewRow"/>).
+    /// The SELECT column order MUST match the <see cref="ReviewRow"/> constructor parameter
+    /// order: Dapper binds a positional record's parameters to result columns by position,
+    /// so a mismatch fails deserializer generation for every row (not a per-value error).
+    /// </summary>
     private const string ViewSelectSql =
         """
         SELECT d.Id AS DraftId, d.Version, t.Label AS TopicLabel, t.Score AS TopicScore,
@@ -47,8 +52,8 @@ public sealed class ReviewRepository(IDbConnectionFactory db, IConfiguration con
                d.FlaggedClaimsJson, d.Confidence, d.Cost, d.Model,
                (SELECT COUNT(*) FROM dbo.nw_DraftImage di WHERE di.DraftId = d.Id) AS ImageCount,
                d.TelegramMessageId,
-               d.FacebookCaption, d.FacebookHashtagsJson,
-               CASE WHEN t.Status = N'Manual' THEN CAST(1 AS bit) ELSE CAST(0 AS bit) END AS IsManual
+               CASE WHEN t.Status = N'Manual' THEN CAST(1 AS bit) ELSE CAST(0 AS bit) END AS IsManual,
+               d.FacebookCaption, d.FacebookHashtagsJson
         FROM dbo.nw_Draft d
         JOIN dbo.nw_Topic t ON t.Id = d.TopicId
         """;

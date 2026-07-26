@@ -28,6 +28,12 @@ The "newsroom-bot" API user + credentials are created programmatically at site s
 when PredelNews:Newsroom:ClientSecret is configured (NewsroomPublishingSetup).
 ```
 
+A human **admin user** is seeded the same way (`AdminUserSetup`, site startup): configure
+`PredelNews:Admin:Email` + `PredelNews:Admin:Password` (user-secrets locally / environment
+on the VPS) and the site ensures the account exists in the Administrators group, syncing
+the password only when config differs. Rotating the config password also unlocks the
+account — the break-glass recovery path for a lost admin login.
+
 Request (multipart or JSON + image URL fetched server-side — final shape decided in Phase 5):
 
 ```json
