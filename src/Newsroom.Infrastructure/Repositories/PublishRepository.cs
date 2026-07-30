@@ -21,9 +21,11 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
     private const string SucceededStatus = "Succeeded";
     private const string FailedStatus = "Failed";
 
-    /// <summary>Editor uploads store a worker-local file path in Url (downloaded from Telegram
-    /// at attach time); the publisher inlines the file as base64 since the site cannot fetch it.</summary>
-    private const string EditorUploadKind = "editor-upload";
+    /// <summary>Editor uploads and AI-generated illustrations store a worker-local file path in
+    /// Url (downloaded from Telegram at attach time / saved at generation time); the publisher
+    /// inlines the file as base64 since the site cannot fetch it.</summary>
+    private static bool IsLocalFileKind(string? kind) =>
+        kind is ImageSourceKinds.EditorUpload or ImageSourceKinds.Ai;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -188,14 +190,15 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
         }).ToList();
     }
 
-    /// <summary>The chosen draft image as a Facebook photo source: editor uploads live on the
-    /// worker's disk (sent as multipart bytes), everything else is a hosted URL Facebook fetches
-    /// server-side. Null when the draft has no image — the publisher then posts text only.</summary>
+    /// <summary>The chosen draft image as a Facebook photo source: editor uploads and AI
+    /// illustrations live on the worker's disk (sent as multipart bytes), everything else is a
+    /// hosted URL Facebook fetches server-side. Null when the draft has no image — the
+    /// publisher then posts text only.</summary>
     private static FacebookImage? ToFacebookImage(string? kind, string? url)
     {
         if (string.IsNullOrWhiteSpace(url))
             return null;
-        return kind == EditorUploadKind
+        return IsLocalFileKind(kind)
             ? new FacebookImage(Url: null, LocalPath: url, FileName: Path.GetFileName(url))
             : new FacebookImage(Url: url, LocalPath: null, FileName: FileNameFromUrl(url));
     }
@@ -337,7 +340,7 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
         if (r.ImageUrl is null)
             return null;
         var altText = r.ImageAltTextBg ?? r.DraftAltTextBg ?? r.Headline;
-        return r.ImageKind == EditorUploadKind
+        return IsLocalFileKind(r.ImageKind)
             ? new PublishImage(
                 Path.GetFileName(r.ImageUrl), SourceUrl: null, altText, r.ImageAttribution,
                 LocalPath: r.ImageUrl)

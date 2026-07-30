@@ -49,6 +49,14 @@ public interface ITelegramGateway
         long chatId, long messageId, string photoUrlOrFileId, string? caption,
         long? draftIdForCycleButton, CancellationToken ct);
 
+    /// <summary>Sends a photo message from a worker-local file (multipart upload) — used for
+    /// AI-generated cover images, which Telegram cannot fetch by URL. Same buttons/caption
+    /// behaviour as <see cref="SendPhotoAsync"/>.</summary>
+    /// <returns>The Telegram message id (stored as nw_Draft.TelegramPhotoMessageId).</returns>
+    Task<long> SendPhotoFileAsync(
+        long chatId, string localPath, string? caption, long? draftIdForCycleButton,
+        int? index, int? total, CancellationToken ct);
+
     /// <summary>Downloads a Telegram file (editor photo upload) into
     /// <paramref name="directory"/> (created when missing) under a unique name; the extension
     /// comes from Telegram's file path (default ".jpg").</summary>
@@ -74,11 +82,13 @@ public interface IReviewRepository
     Task SetTelegramMessageIdAsync(long draftId, long messageId, CancellationToken ct);
 
     /// <summary>PendingReview drafts whose text card is posted (TelegramMessageId set) but whose
-    /// photo message is not (TelegramPhotoMessageId null) and that have at least one stock
-    /// suggestion. Url/Caption describe the top image (Selected DESC, Ordinal; caption =
-    /// attribution + alt text); Total counts the stock suggestions — the cycle button only makes
-    /// sense when it is ≥ 2. Drafts without stock images never appear (text-only flow).</summary>
-    Task<IReadOnlyList<(long DraftId, string Url, string? Caption, int Total)>> GetPendingPhotoDispatchAsync(
+    /// photo message is not (TelegramPhotoMessageId null) and that have at least one stock or
+    /// AI-generated suggestion. Url/Caption describe the top image (Selected DESC, Ordinal;
+    /// caption = attribution + alt text); Total counts the suggestions — the cycle button only
+    /// makes sense when it is ≥ 2. IsLocalFile marks an AI-generated image whose Url is a
+    /// worker-local path the dispatcher must upload (Telegram cannot fetch it). Drafts without
+    /// suggestions never appear (text-only flow).</summary>
+    Task<IReadOnlyList<(long DraftId, string Url, string? Caption, int Total, bool IsLocalFile)>> GetPendingPhotoDispatchAsync(
         int max, CancellationToken ct);
 
     Task SetTelegramPhotoMessageIdAsync(long draftId, long messageId, CancellationToken ct);

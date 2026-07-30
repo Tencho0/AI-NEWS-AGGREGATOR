@@ -10,8 +10,9 @@ namespace Newsroom.Worker.Jobs;
 /// <summary>
 /// Generates article drafts for Hot topics (docs/02-functional-spec.md §4): bundle the topic's
 /// sources, draft in Bulgarian per the embedded style guide, gate through
-/// <see cref="DraftValidator"/>, self-check against the sources (non-fatal), attach stock-image
-/// suggestions and store as PendingReview for the Telegram review surface (TelegramJob).
+/// <see cref="DraftValidator"/>, self-check against the sources (non-fatal), attach the cover
+/// image — AI-generated from the article's details, stock suggestions as the fallback
+/// (ADR-0011) — and store as PendingReview for the Telegram review surface (TelegramJob).
 /// Editor-requested regenerations (✏️ Промени) run first each cycle, and the editor's /pause
 /// flag skips all generation (scraping/analysis unaffected). Throttled and budgeted like every
 /// AI stage (ADR-0010); the <see cref="IDraftingAi"/> is Lazy so a missing API key degrades to
@@ -22,7 +23,7 @@ public sealed class DraftJob(
     IReviewRepository reviews,
     IAiBudget budget,
     Lazy<IDraftingAi> draftingAi,
-    ImageSuggestionService imageSuggestions,
+    FeaturedImageService featuredImages,
     IJobHeartbeat heartbeat,
     IConfiguration configuration,
     ILogger<DraftJob> logger) : BackgroundService
@@ -202,7 +203,7 @@ public sealed class DraftJob(
 
         var (unsupportedClaims, selfCheckUsage) = await SelfCheckAsync(content, bundle, ct);
         var flaggedClaims = MergeFlaggedClaims(content, unsupportedClaims);
-        var images = await imageSuggestions.SuggestAsync(content.ImageSearchQueries, ct);
+        var images = await featuredImages.GetCandidatesAsync(content, ct);
         var usage = CombineUsage(generation.Usage, selfCheckUsage);
 
         await drafts.SaveDraftAsync(bundle, content, usage, flaggedClaims, images, PromptVersion, ct);
@@ -242,7 +243,7 @@ public sealed class DraftJob(
 
         var (unsupportedClaims, selfCheckUsage) = await SelfCheckAsync(content, bundle, ct);
         var flaggedClaims = MergeFlaggedClaims(content, unsupportedClaims);
-        var images = await imageSuggestions.SuggestAsync(content.ImageSearchQueries, ct);
+        var images = await featuredImages.GetCandidatesAsync(content, ct);
         var usage = CombineUsage(generation.Usage, selfCheckUsage);
 
         // The same row flips to PendingReview with TelegramMessageId still null, so the

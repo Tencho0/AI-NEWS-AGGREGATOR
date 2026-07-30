@@ -128,20 +128,25 @@ public sealed class TelegramJob(
     }
 
     /// <summary>Posts the photo message with the draft's top image suggestion (docs/05
-    /// telegram.md: attribution in the caption). Drafts without stock images never show up
-    /// here and keep the text-only flow; the 🖼 cycle button only appears when there is
-    /// something to cycle to.</summary>
+    /// telegram.md: attribution in the caption). Stock suggestions travel by URL (Telegram
+    /// fetches them); AI-generated covers are worker-local files and get uploaded. Drafts
+    /// without suggestions never show up here and keep the text-only flow; the 🖼 cycle button
+    /// only appears when there is something to cycle to.</summary>
     private async Task DispatchPendingPhotosAsync(TelegramOptions options, CancellationToken ct)
     {
         var pendingPhotos = await reviews.GetPendingPhotoDispatchAsync(options.MaxSendPerCycle, ct);
-        foreach (var (draftId, url, caption, total) in pendingPhotos)
+        foreach (var (draftId, url, caption, total, isLocalFile) in pendingPhotos)
         {
             ct.ThrowIfCancellationRequested();
             try
             {
-                var messageId = await gateway.Value.SendPhotoAsync(
-                    options.ReviewChatId, url, caption,
-                    draftIdForCycleButton: total >= 2 ? draftId : null, index: null, total, ct);
+                var messageId = isLocalFile
+                    ? await gateway.Value.SendPhotoFileAsync(
+                        options.ReviewChatId, url, caption,
+                        draftIdForCycleButton: total >= 2 ? draftId : null, index: null, total, ct)
+                    : await gateway.Value.SendPhotoAsync(
+                        options.ReviewChatId, url, caption,
+                        draftIdForCycleButton: total >= 2 ? draftId : null, index: null, total, ct);
                 await reviews.SetTelegramPhotoMessageIdAsync(draftId, messageId, ct);
                 logger.LogInformation(
                     "🖼 Draft {DraftId}: image suggestion posted (message {MessageId}, {Total} total)",

@@ -138,6 +138,21 @@ public sealed class TelegramGateway(string botToken) : ITelegramGateway
         return message.MessageId;
     }
 
+    public async Task<long> SendPhotoFileAsync(
+        long chatId, string localPath, string? caption, long? draftIdForCycleButton,
+        int? index, int? total, CancellationToken ct)
+    {
+        // AI-generated covers exist only on the worker's disk, so they go up as multipart bytes.
+        await using var stream = File.OpenRead(localPath);
+        var message = await bot.SendPhoto(
+            chatId,
+            InputFile.FromStream(stream, Path.GetFileName(localPath)),
+            caption: WithIndexLine(caption, index, total),
+            replyMarkup: CycleKeyboard(draftIdForCycleButton),
+            cancellationToken: ct);
+        return message.MessageId;
+    }
+
     public async Task EditPhotoAsync(
         long chatId, long messageId, string photoUrlOrFileId, string? caption,
         long? draftIdForCycleButton, CancellationToken ct)

@@ -435,7 +435,7 @@ public sealed class DraftRepository(IDbConnectionFactory db) : IDraftRepository
                 {
                     draftId,
                     ordinal = i + 1,
-                    sourceKind = "stock", // stock suggestions only (ADR-0009 tiers 1/3/4 come later)
+                    sourceKind = image.SourceKind, // 'stock' or 'ai' here; 'editor-upload' attaches later
                     url = Truncate(image.Url, 2000),
                     thumbUrl = Truncate(image.ThumbUrl, 2000),
                     providerName = Truncate(image.ProviderName, 50),

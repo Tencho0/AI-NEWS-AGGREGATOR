@@ -37,6 +37,29 @@ public interface IImageProvider
     Task<IReadOnlyList<ImageCandidate>> SearchAsync(string query, int count, CancellationToken ct);
 }
 
+/// <summary>The generated cover image plus what the request consumed.</summary>
+public sealed record AiImageResult(ImageCandidate Image, AiUsage Usage);
+
+/// <summary>
+/// AI cover-image generation from the article's own details (docs/05-integrations/images.md
+/// tier 3, ADR-0011 — FLUX.1 Schnell on Cloudflare Workers AI). Runs BEFORE the draft goes to
+/// Telegram review, so the editor approves the article together with its generated image.
+/// </summary>
+public interface IAiImageGenerator
+{
+    string Name { get; }
+
+    /// <summary>False while the account/token configuration is missing; the pipeline then goes
+    /// straight to the stock providers (the pre-ADR-0011 behaviour).</summary>
+    bool IsConfigured { get; }
+
+    /// <summary>Generates one illustration from the draft's details and saves it to the
+    /// worker's disk; the candidate's Url is that local path (<see cref="ImageSourceKinds.Ai"/>),
+    /// published like an editor upload. Throws on any provider failure — the caller falls back
+    /// to the stock providers.</summary>
+    Task<AiImageResult> GenerateAsync(DraftContent content, CancellationToken ct);
+}
+
 public interface IDraftRepository
 {
     /// <summary>Hot topics that should get a draft: not muted (MutedUntilUtc null or past),

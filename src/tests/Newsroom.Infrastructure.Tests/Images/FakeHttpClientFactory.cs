@@ -9,21 +9,26 @@ internal sealed class FakeHttpClientFactory(HttpMessageHandler handler) : IHttpC
     public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
 }
 
-/// <summary>Returns one canned JSON response and records the request it answered.</summary>
+/// <summary>Returns one canned JSON response and records the request it answered. The body is
+/// captured at send time (LastRequestBody) — callers dispose the request after sending.</summary>
 internal sealed class CannedResponseHandler(string json, HttpStatusCode statusCode = HttpStatusCode.OK)
     : HttpMessageHandler
 {
     public HttpRequestMessage? LastRequest { get; private set; }
+    public string? LastRequestBody { get; private set; }
     public int RequestCount { get; private set; }
 
-    protected override Task<HttpResponseMessage> SendAsync(
+    protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request, CancellationToken cancellationToken)
     {
         LastRequest = request;
+        LastRequestBody = request.Content is null
+            ? null
+            : await request.Content.ReadAsStringAsync(cancellationToken);
         RequestCount++;
-        return Task.FromResult(new HttpResponseMessage(statusCode)
+        return new HttpResponseMessage(statusCode)
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json"),
-        });
+        };
     }
 }

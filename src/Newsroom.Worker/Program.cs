@@ -111,6 +111,15 @@ try
     builder.Services.AddSingleton<IImageProvider, PexelsImageProvider>();
     builder.Services.AddSingleton<ImageSuggestionService>();
 
+    // Cover-image generation (ADR-0011): FLUX.1 Schnell on Cloudflare Workers AI, tried before
+    // the stock providers. Its client gets a generation-friendly timeout and NO resilience
+    // handler — a failed generation must fall back to stock, not burn quota on retries.
+    builder.Services.AddHttpClient(CloudflareFluxImageGenerator.HttpClientName,
+        client => client.Timeout = TimeSpan.FromSeconds(60));
+    builder.Services.AddSingleton(CloudflareImagesOptions.From(builder.Configuration));
+    builder.Services.AddSingleton<IAiImageGenerator, CloudflareFluxImageGenerator>();
+    builder.Services.AddSingleton<FeaturedImageService>();
+
     // Telegram editorial review (docs/02-functional-spec.md §5, ADR-0006: long polling). The
     // gateway is Lazy on the AI-client pattern: TelegramJob guards on configuration, so a
     // missing bot token degrades to a dormant review stage instead of failing host startup.

@@ -1,6 +1,6 @@
 # 11 — Risks & Open Questions
 
-**Status:** Living document · **Last updated:** 2026-07-02
+**Status:** Living document · **Last updated:** 2026-07-30
 
 ## Risk register
 
@@ -26,7 +26,7 @@
 | Q-1 | ✅ **Resolved 2026-07-03** — owner named 8 sources; 6 have verified feeds and are live (БТА, Mediapool, Струма, Топ Преса, ИнфоМрежа, Благоевград24 — see `tools/seed-sources.sql`); 2 deferred pending sitemap/html adapters (pirinsko.com — no RSS; blagoevgrad.bg — sitemap only). Feeds probed with the bot UA; runtime robots.txt compliance enforced by the scraper | Done | — |
 | Q-2 | Editorial style guide — **draft written** ([editorial-style-guide.md](editorial-style-guide.md), derived from the two sample articles); awaiting owner review + answers to its 4 open points. Used verbatim in the drafting prompt from Phase 3 on | Review any time (draft unblocks Phase 3) | Editor |
 | Q-3 | AI budget policy: launch is free-tier ($0); what monthly ceiling applies **if/when** a stage upgrades to paid (triggers: R-11 quota pressure or R-12 quality gate) | Phase 3 (eval time) | Owner |
-| Q-4 | AI image generation provider (if tier-3 images are wanted) | Phase 3+ | Dev |
+| Q-4 | ✅ **Resolved 2026-07-30** (ADR-0011) — Cloudflare Workers AI, FLUX.1 Schnell (free tier): AI illustration generated first for every automated draft, automatic fallback to stock on any failure or quota exhaustion; ADR-0009 tier-3 guardrails kept (illustration style, no real people, "Илюстрация" label) | Done | — |
 | Q-5 | Is the SQL Express backup regime covering new databases automatically? | Phase 0 | Dev |
 | Q-6 | Author identity for automated articles on the site (dedicated "Predel News" staff author vs. per-editor) | Phase 5 | Editor |
 | Q-7 | FB post format preference (link post vs photo post) per category | Phase 6 | Editor |

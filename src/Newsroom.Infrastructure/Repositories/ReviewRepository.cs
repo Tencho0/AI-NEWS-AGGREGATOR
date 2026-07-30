@@ -26,9 +26,6 @@ public sealed class ReviewRepository(IDbConnectionFactory db, IConfiguration con
 {
     private const string UpdateOffsetKey = "Telegram:UpdateOffset";
     private const string ChangeInstructionsKind = "ChangeInstructions";
-    /// <summary>nw_DraftImage.SourceKind values (ADR-0009; mirrors PublishRepository).</summary>
-    private const string StockKind = "stock";
-    private const string EditorUploadKind = "editor-upload";
     private const string EditorUploadAttribution = "редакторска снимка";
     /// <summary>Mirrors HeartbeatService.ConfigKey (the Worker project is not referenced here).</summary>
     private const string HeartbeatKey = "Worker:LastHeartbeatUtc";
@@ -123,23 +120,25 @@ public sealed class ReviewRepository(IDbConnectionFactory db, IConfiguration con
             new { draftId, messageId, pendingStatus = nameof(DraftStatus.PendingReview) });
     }
 
-    public async Task<IReadOnlyList<(long DraftId, string Url, string? Caption, int Total)>> GetPendingPhotoDispatchAsync(
+    public async Task<IReadOnlyList<(long DraftId, string Url, string? Caption, int Total, bool IsLocalFile)>> GetPendingPhotoDispatchAsync(
         int max, CancellationToken ct)
     {
         using var connection = await db.OpenAsync(ct);
-        // CROSS APPLY = "has a dispatchable stock image"; the top image mirrors the publish
-        // path's pick (Selected DESC, Ordinal), so the editor reviews what would be published.
-        var rows = await connection.QueryAsync<(long DraftId, string Url, string? Attribution, string? AltTextBg, int Total)>(
+        // CROSS APPLY = "has a dispatchable stock or AI suggestion"; the top image mirrors the
+        // publish path's pick (Selected DESC, Ordinal), so the editor reviews what would be
+        // published. AI images live on the worker's disk — IsLocalFile tells the dispatcher to
+        // upload instead of passing a URL.
+        var rows = await connection.QueryAsync<(long DraftId, string SourceKind, string Url, string? Attribution, string? AltTextBg, int Total)>(
             """
             SELECT TOP (@max)
-                   d.Id AS DraftId, img.Url, img.Attribution, img.AltTextBg,
+                   d.Id AS DraftId, img.SourceKind, img.Url, img.Attribution, img.AltTextBg,
                    (SELECT COUNT(*) FROM dbo.nw_DraftImage dc
-                    WHERE dc.DraftId = d.Id AND dc.SourceKind = @stockKind) AS Total
+                    WHERE dc.DraftId = d.Id AND dc.SourceKind IN (@stockKind, @aiKind)) AS Total
             FROM dbo.nw_Draft d
             CROSS APPLY (
-                SELECT TOP 1 di.Url, di.Attribution, di.AltTextBg
+                SELECT TOP 1 di.SourceKind, di.Url, di.Attribution, di.AltTextBg
                 FROM dbo.nw_DraftImage di
-                WHERE di.DraftId = d.Id AND di.SourceKind = @stockKind
+                WHERE di.DraftId = d.Id AND di.SourceKind IN (@stockKind, @aiKind)
                 ORDER BY di.Selected DESC, di.Ordinal
             ) img
             WHERE d.Status = @pendingStatus
@@ -147,9 +146,16 @@ public sealed class ReviewRepository(IDbConnectionFactory db, IConfiguration con
               AND d.TelegramPhotoMessageId IS NULL
             ORDER BY d.Id
             """,
-            new { max, stockKind = StockKind, pendingStatus = nameof(DraftStatus.PendingReview) });
+            new
+            {
+                max,
+                stockKind = ImageSourceKinds.Stock,
+                aiKind = ImageSourceKinds.Ai,
+                pendingStatus = nameof(DraftStatus.PendingReview),
+            });
         return rows
-            .Select(r => (r.DraftId, r.Url, ComposeImageCaption(r.Attribution, r.AltTextBg), r.Total))
+            .Select(r => (r.DraftId, r.Url, ComposeImageCaption(r.Attribution, r.AltTextBg), r.Total,
+                r.SourceKind == ImageSourceKinds.Ai))
             .ToList();
     }
 
@@ -200,7 +206,7 @@ public sealed class ReviewRepository(IDbConnectionFactory db, IConfiguration con
             new { draftId },
             transaction)).ToList();
 
-        var stock = images.Where(i => i.SourceKind == StockKind).ToList();
+        var stock = images.Where(i => i.SourceKind == ImageSourceKinds.Stock).ToList();
         if (stock.Count < 2)
             return null; // nothing to cycle to
 
@@ -270,7 +276,7 @@ public sealed class ReviewRepository(IDbConnectionFactory db, IConfiguration con
             new
             {
                 draftId,
-                kind = EditorUploadKind,
+                kind = ImageSourceKinds.EditorUpload,
                 url = Truncate(localPath, 2000),
                 thumbUrl = Truncate(fileId, 2000),
                 attribution = EditorUploadAttribution,
