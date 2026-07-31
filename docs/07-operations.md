@@ -24,6 +24,11 @@ The **Telegram admin thread is the ops console** for v1 — no extra infra:
 | FB token invalid (daily health check) | 🔴 with re-auth runbook link |
 | Daily digest (09:00): articles scraped, topics, drafts, approvals, publishes, cost | ℹ️ |
 
+The digest covers the **last complete UTC day** — the one named in its header. The send time is
+VPS-local, so reporting "today" would have counted only the hours since UTC midnight (six, at
+UTC+3) under a header claiming the whole day. Hot topics and enabled/disabled source counts are
+deliberately current snapshots, not day figures.
+
 `/status` returns the same data on demand. Windows Service recovery options: restart on failure
 (1 min, 5 min, 15 min). If richer monitoring is ever needed (uptime pings, dashboards), that's a
 new ADR — deliberately out of v1.

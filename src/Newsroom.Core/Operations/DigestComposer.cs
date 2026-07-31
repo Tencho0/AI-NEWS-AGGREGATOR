@@ -34,7 +34,9 @@ public static class DigestComposer
         text.Append("🔥 Теми: ").Append(stats.TopicsCreated).Append(" нови · ")
             .Append(stats.HotTopics).Append(" горещи в момента").Append('\n');
 
-        text.Append("📝 Чернови днес: ").Append(stats.DraftsCreatedByStatus.Count == 0
+        // No "днес" on the per-day lines: the header already names the day, and that day is the
+        // one before the send (DigestPolicy.DayToReport), so "today" would contradict it.
+        text.Append("📝 Чернови: ").Append(stats.DraftsCreatedByStatus.Count == 0
             ? "няма"
             : string.Join(" · ", stats.DraftsCreatedByStatus
                 .Select(d => $"{ReviewMessageRenderer.Escape(d.Status)} {d.Count}")));

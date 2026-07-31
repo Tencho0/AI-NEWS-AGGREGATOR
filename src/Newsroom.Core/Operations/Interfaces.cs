@@ -44,8 +44,10 @@ public interface IOperationsRepository
     /// <summary>Upserts a nw_Config value (MERGE — same contract as runtime flags).</summary>
     Task SetConfigValueAsync(string key, string value, CancellationToken ct);
 
-    /// <summary>Aggregates one day of pipeline activity (everything at/after
-    /// <paramref name="dayUtc"/>) for the daily digest.</summary>
+    /// <summary>Aggregates one day of pipeline activity for the daily digest: the half-open UTC
+    /// window [<paramref name="dayUtc"/>, <paramref name="dayUtc"/> + 1 day). The few
+    /// current-state figures on <see cref="DigestStats"/> (hot topics, enabled/disabled sources)
+    /// are snapshots and ignore the window.</summary>
     Task<DigestStats> GetDigestStatsAsync(DateTime dayUtc, CancellationToken ct);
 
     /// <summary>Retention: NULLs nw_SourceArticle.ExtractedText for articles first seen before

@@ -37,7 +37,7 @@ public class DigestComposerTests
         Assert.Contains("• Дневник: 30", text);
         Assert.Contains("• БНТ: 12", text);
         Assert.Contains("Теми: 3 нови · 2 горещи в момента", text);
-        Assert.Contains("Чернови днес: PendingReview 2 · Published 1", text);
+        Assert.Contains("Чернови: PendingReview 2 · Published 1", text);
         Assert.Contains("Редакторски действия: Approved 2 · Rejected 1", text);
         Assert.Contains("Публикации: 3 успешни · 1 неуспешни", text);
         Assert.Contains("AI: 120 заявки · 400000/50000 токена · $0.1234", text);
@@ -70,7 +70,7 @@ public class DigestComposerTests
 
         Assert.Contains("Статии: 0\n", text);
         Assert.DoesNotContain("анализирани", text); // no breakdown when nothing was scraped
-        Assert.Contains("Чернови днес: няма", text);
+        Assert.Contains("Чернови: няма", text);
         Assert.Contains("Редакторски действия: няма", text);
         Assert.Contains("AI: 0 заявки", text);
         Assert.Contains("$0", text);

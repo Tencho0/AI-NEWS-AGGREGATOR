@@ -12,7 +12,9 @@ namespace Newsroom.Worker.Jobs;
 /// target minute has passed and today has not been sent yet; the last-sent date persists in
 /// nw_Config ('Digest:LastSentDate'), so restarts never double-send and a worker that was down
 /// at 09:00 sends the digest as soon as it is back. Content is composed by the pure
-/// <see cref="DigestComposer"/> over one repository aggregate covering today (UTC). Without
+/// <see cref="DigestComposer"/> over one repository aggregate covering the last complete UTC day
+/// (<see cref="DigestPolicy.DayToReport"/>) — the send time is local, so "today" would mean only
+/// the hours since UTC midnight. Without
 /// Telegram configuration the day is marked handled silently — same dormancy rule as the
 /// other Telegram-facing jobs.
 /// </summary>
@@ -65,7 +67,8 @@ public sealed class DailyDigestJob(
                 return;
             }
 
-            var stats = await operations.GetDigestStatsAsync(DateTime.UtcNow.Date, ct);
+            var stats = await operations.GetDigestStatsAsync(
+                DigestPolicy.DayToReport(DateTime.UtcNow), ct);
             await gateway.Value.SendHtmlAsync(
                 telegram.ReviewChatId, DigestComposer.Compose(stats),
                 withReviewButtons: false, draftIdForButtons: null, scheduleButtonLabel: null, ct);

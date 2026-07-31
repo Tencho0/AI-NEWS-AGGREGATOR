@@ -67,43 +67,47 @@ public sealed class OperationsRepository(IDbConnectionFactory db) : IOperationsR
     public async Task<DigestStats> GetDigestStatsAsync(DateTime dayUtc, CancellationToken ct)
     {
         using var connection = await db.OpenAsync(ct);
+        // Both bounds are explicit: the digest reports a day that is already over
+        // (DigestPolicy.DayToReport), so an open-ended >= would fold every later day into the
+        // figures under a header naming just this one.
         using var multi = await connection.QueryMultipleAsync(
             """
             SELECT s.Name, COUNT(*) AS Cnt
             FROM dbo.nw_SourceArticle a
             JOIN dbo.nw_Source s ON s.Id = a.SourceId
-            WHERE a.FirstSeenAtUtc >= @dayUtc
+            WHERE a.FirstSeenAtUtc >= @dayUtc AND a.FirstSeenAtUtc < @nextDayUtc
             GROUP BY s.Name
             ORDER BY COUNT(*) DESC, s.Name;
 
             SELECT a.Status, COUNT(*) AS Cnt
             FROM dbo.nw_SourceArticle a
-            WHERE a.FirstSeenAtUtc >= @dayUtc
+            WHERE a.FirstSeenAtUtc >= @dayUtc AND a.FirstSeenAtUtc < @nextDayUtc
             GROUP BY a.Status;
 
-            SELECT COUNT(*) FROM dbo.nw_Topic WHERE FirstSeenAtUtc >= @dayUtc;
+            SELECT COUNT(*) FROM dbo.nw_Topic
+            WHERE FirstSeenAtUtc >= @dayUtc AND FirstSeenAtUtc < @nextDayUtc;
 
             SELECT COUNT(*) FROM dbo.nw_Topic WHERE Status = @hotStatus;
 
             SELECT d.Status, COUNT(*) AS Cnt
             FROM dbo.nw_Draft d
-            WHERE d.CreatedAtUtc >= @dayUtc
+            WHERE d.CreatedAtUtc >= @dayUtc AND d.CreatedAtUtc < @nextDayUtc
             GROUP BY d.Status;
 
             SELECT r.[Action], COUNT(*) AS Cnt
             FROM dbo.nw_ReviewAction r
-            WHERE r.AtUtc >= @dayUtc
+            WHERE r.AtUtc >= @dayUtc AND r.AtUtc < @nextDayUtc
             GROUP BY r.[Action];
 
             SELECT ISNULL(SUM(CASE WHEN Status = @succeededStatus THEN 1 ELSE 0 END), 0) AS Succeeded,
                    ISNULL(SUM(CASE WHEN Status = @failedStatus THEN 1 ELSE 0 END), 0) AS Failed
             FROM dbo.nw_PublishRecord
-            WHERE AtUtc >= @dayUtc;
+            WHERE AtUtc >= @dayUtc AND AtUtc < @nextDayUtc;
 
             SELECT ISNULL(SUM(RequestCount), 0) AS Requests, ISNULL(SUM(TokensIn), 0) AS TokensIn,
                    ISNULL(SUM(TokensOut), 0) AS TokensOut, ISNULL(SUM(Cost), 0) AS Cost
             FROM dbo.nw_CostLedger
-            WHERE AtUtc >= @dayUtc;
+            WHERE AtUtc >= @dayUtc AND AtUtc < @nextDayUtc;
 
             SELECT ISNULL(SUM(CASE WHEN Enabled = 1 THEN 1 ELSE 0 END), 0) AS Enabled,
                    ISNULL(SUM(CASE WHEN Enabled = 0 THEN 1 ELSE 0 END), 0) AS Disabled
@@ -112,6 +116,7 @@ public sealed class OperationsRepository(IDbConnectionFactory db) : IOperationsR
             new
             {
                 dayUtc,
+                nextDayUtc = dayUtc.AddDays(1),
                 hotStatus = nameof(TopicStatus.Hot),
                 succeededStatus = "Succeeded",
                 failedStatus = "Failed",
