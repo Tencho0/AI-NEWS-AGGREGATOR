@@ -2,32 +2,52 @@ using Microsoft.Extensions.Logging;
 
 using Newsroom.Core.Ai;
 using Newsroom.Core.Drafting;
+using Newsroom.Core.Operations;
 
 namespace Newsroom.Infrastructure.Images;
 
 /// <summary>
-/// The draft pipeline's single cover-image seam (docs/05-integrations/images.md, ADR-0011),
-/// called before the draft goes to Telegram review: AI generation first (tier 3 — a unique
-/// on-topic illustration from the article's own details), stock search (tier 2 — Pexels,
+/// The draft pipeline's single cover-image seam (docs/05-integrations/images.md, ADR-0011,
+/// ADR-0012), called before the draft goes to Telegram review: AI generation first (tier 3 — a
+/// cinematic on-topic cover built from the article's own scene), stock search (tier 2 — Pexels,
 /// Pixabay) as the fallback whenever the generator is unconfigured, out of daily budget
-/// (Ai:Stages:Image:DailyRequestBudget caps the Cloudflare free tier), or fails for any
-/// reason. Fallback failures follow the existing contract: an empty result just sends the
-/// draft to review without image suggestions.
+/// (Ai:Stages:Image:DailyRequestBudget), or fails for any reason. Fallback failures follow the
+/// existing contract: an empty result just sends the draft to review without image suggestions.
+///
+/// Cost rule (ADR-0012): the free Workers AI allocation is the ceiling, never a starting point.
+/// When Cloudflare says the allocation is gone, this service does not retry, does not escalate
+/// to a billable model, and does not keep hammering the endpoint for the rest of the day — it
+/// alerts the editor on Telegram once and serves stock covers until the allocation resets at
+/// UTC midnight.
 /// </summary>
 public sealed class FeaturedImageService(
     IAiImageGenerator generator,
     ImageSuggestionService stockSuggestions,
     IAiBudget budget,
+    IOperatorAlerts alerts,
     ILogger<FeaturedImageService> logger)
 {
     /// <summary>nw_CostLedger stage of one generation request (ADR-0010 metering).</summary>
     public const string Stage = "Image";
+
+    /// <summary>UTC date whose allocation is known to be gone; generation is skipped while it
+    /// equals today. In-memory on purpose — a restart re-probes once, which is cheap and
+    /// self-healing if the allocation was reset or raised.</summary>
+    private DateOnly? quotaExhaustedOn;
 
     public async Task<IReadOnlyList<ImageCandidate>> GetCandidatesAsync(
         DraftContent content, CancellationToken ct)
     {
         if (!generator.IsConfigured)
             return await stockSuggestions.SuggestAsync(content.ImageSearchQueries, ct);
+
+        if (quotaExhaustedOn == DateOnly.FromDateTime(DateTime.UtcNow))
+        {
+            logger.LogInformation(
+                "Skipping AI cover generation: the {Provider} free allocation is exhausted for today",
+                generator.Name);
+            return await stockSuggestions.SuggestAsync(content.ImageSearchQueries, ct);
+        }
 
         try
         {
@@ -45,11 +65,37 @@ public sealed class FeaturedImageService(
                 generator.Name, result.Image.Url);
             return [result.Image];
         }
+        catch (CloudflareAiException ex) when (ex.QuotaExhausted)
+        {
+            await StopForTheDayAsync(ex, ct);
+            return await stockSuggestions.SuggestAsync(content.ImageSearchQueries, ct);
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogWarning(ex,
                 "AI cover-image generation failed; falling back to the stock providers");
             return await stockSuggestions.SuggestAsync(content.ImageSearchQueries, ct);
         }
+    }
+
+    /// <summary>One alert per exhausted day, then silence — the editor needs to know the covers
+    /// have degraded to stock, not to be paged per draft.</summary>
+    private async Task StopForTheDayAsync(CloudflareAiException ex, CancellationToken ct)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var alreadyAlerted = quotaExhaustedOn == today;
+        quotaExhaustedOn = today;
+
+        logger.LogError(ex,
+            "{Provider} free allocation exhausted; AI cover generation is off until UTC midnight",
+            generator.Name);
+        if (alreadyAlerted)
+            return;
+
+        await alerts.RaiseAsync(
+            "⚠️ Безплатната дневна квота за генериране на корици (Cloudflare Workers AI) свърши. "
+            + "Спирам генерирането до 00:00 UTC — корици от стокови снимки дотогава. "
+            + "Не включвам платен план. Детайли: " + ex.Message,
+            ct);
     }
 }

@@ -6,6 +6,7 @@ using Microsoft.Extensions.AI;
 
 using Newsroom.Core.Ai;
 using Newsroom.Core.Drafting;
+using Newsroom.Core.Images;
 using Newsroom.Core.Prompts;
 
 namespace Newsroom.Infrastructure.Ai;
@@ -22,9 +23,12 @@ public sealed class GeminiDraftingAi(
     IChatClient draftChatClient,
     IChatClient selfCheckChatClient,
     GeminiDraftingOptions options,
-    AiRateLimiter rateLimiter) : IDraftingAi
+    AiRateLimiter rateLimiter,
+    PublicFigureDirectory? publicFigures = null) : IDraftingAi
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    private readonly PublicFigureDirectory figures = publicFigures ?? PublicFigureDirectory.Empty;
 
     public async Task<DraftGenerationResult> GenerateAsync(
         TopicBundle bundle, RegenerationContext? regenContext, CancellationToken ct)
@@ -33,9 +37,13 @@ public sealed class GeminiDraftingAi(
 
         using var lease = await rateLimiter.AcquireAsync(ct).ConfigureAwait(false);
 
+        // Only figures the sources actually name become candidates — the model picks from that
+        // list or returns null, so it can never conjure a person the article does not mention.
+        var candidates = figures.Mentioned(BundleText(bundle));
+
         List<ChatMessage> messages =
         [
-            new(ChatRole.System, BuildGenerateInstruction()),
+            new(ChatRole.System, BuildGenerateInstruction(candidates)),
             new(ChatRole.User, BuildBundleBlock(bundle)),
         ];
         if (regenContext is not null)
@@ -82,7 +90,7 @@ public sealed class GeminiDraftingAi(
         return new AiUsage("gemini", response.ModelId ?? fallbackModel, tokensIn, tokensOut, cost);
     }
 
-    private string BuildGenerateInstruction() =>
+    private string BuildGenerateInstruction(IReadOnlyList<PublicFigure> candidates) =>
         $$"""
         Ти си журналист в регионалната медия Predel News.
 
@@ -107,7 +115,26 @@ public sealed class GeminiDraftingAi(
         - "seoDescription": до 160 знака
         - "imageSearchQueries": 2-3 заявки за стокови снимки на АНГЛИЙСКИ — общи и илюстративни,
           без имена на хора
-        - "imageAltTextBg": описателен alt текст на български за илюстративната снимка
+        - "imageScene": ЕДНА свързана сцена на АНГЛИЙСКИ за корицата (1-2 изречения, до 300
+          знака) — конкретен момент, който се случва точно сега по темата на статията: какво
+          прави главният обект, кои второстепенни елементи го подкрепят, къде е (град, село,
+          път, планина, гора, поле, институция, спортна зала — според статията), по кое време на
+          деня и при какво време. Пиши го като кадър от репортаж, не като списък с ключови думи;
+          без имена на хора, без надписи и текст в кадъра, без празни или статични сцени.
+        - "coverHeadline": МНОГО кратко заглавие на БЪЛГАРСКИ за изписване ВЪРХУ корицата — до
+          {{CoverTextPlan.MaxHeadlineChars}} знака, 2-5 думи, без точка в края, без кавички.
+          Това е текст, който ще бъде нарисуван в самата картинка, затова трябва да се чете от
+          един поглед. Не повтаряй дълго заглавието на статията.
+        - "coverKeyPoints": 0 до {{CoverTextPlan.MaxKeyPoints}} много кратки акцента на БЪЛГАРСКИ —
+          най-важните числа или факти, всеки до {{CoverTextPlan.MaxKeyPointChars}} знака
+          (напр. "3 сгради", "18 пожарникари", "12 млн. лв."). Празен масив, ако статията няма
+          силно число. Без изречения.
+        - "coverTextEmphasis": "headline" ако заглавието трябва да е най-голямото на корицата,
+          или "number" ако новината Е числото и то трябва да доминира
+        - "coverTextPlacement": едно от: lower-third, lower-left, lower-right, left-third,
+          right-third, upper-left — къде да легне текстовият блок, така че да НЕ покрива
+          главния обект от "imageScene"
+        - "imageAltTextBg": описателен alt текст на български за илюстративната снимка{{PublicFigureBlock(candidates)}}
         - "flaggedClaims": твърдения от изворите, които не можа да провериш или идват само от
           един източник (празен масив, ако няма такива)
         - "confidence": число 0..1 — увереността ти, че статията е точна и пълна
@@ -119,6 +146,44 @@ public sealed class GeminiDraftingAi(
         - "facebookHashtags": 2-3 хаштага на български за региона и темата
           (напр. "#Благоевград") — само букви и цифри след #
         """;
+
+    /// <summary>
+    /// The <c>imageCentralPerson</c> contract, added only when the sources actually name a
+    /// configured public figure (ADR-0012). The model judges visual relevance — is this person
+    /// the event, or just a quoted voice — and the image layer still refuses to draw anyone
+    /// without an approved reference photo, so a wrong "yes" costs a symbolic cover, never an
+    /// invented likeness.
+    /// </summary>
+    private static string PublicFigureBlock(IReadOnlyList<PublicFigure> candidates)
+    {
+        if (candidates.Count == 0)
+            return "";
+
+        var list = string.Join("; ", candidates.Select(f => $"{f.Name} ({f.Role})"));
+        return $"""
+
+        - "imageCentralPerson": едно име ТОЧНО както е изписано в списъка по-долу, или null.
+          Избери име САМО ако този човек е наистина централен за събитието — решението,
+          изявлението, назначението, появата, кампанията или действието са негови и без него
+          новината не съществува. Върни null, ако е само цитиран мимоходом, споменат като фон
+          или като част от институция, а също и при криминални, скандални или обвинителни теми,
+          където символична сцена е по-уместна от лице. Не измисляй имена извън списъка.
+          Разпознати личности в изворите: {list}
+        """;
+    }
+
+    /// <summary>Everything the sources say, for public-figure mention matching.</summary>
+    private static string BundleText(TopicBundle bundle)
+    {
+        var text = new StringBuilder(bundle.Label);
+        foreach (var article in bundle.Articles)
+        {
+            text.Append('\n').Append(article.Title)
+                .Append('\n').Append(article.Summary)
+                .Append('\n').Append(article.Text);
+        }
+        return text.ToString();
+    }
 
     private const string SelfCheckInstruction =
         """
@@ -213,7 +278,11 @@ public sealed class GeminiDraftingAi(
             CleanList(dto.FlaggedClaims),
             dto.Confidence ?? 0,
             dto.FacebookCaption?.Trim() ?? "",
-            CleanList(dto.FacebookHashtags));
+            CleanList(dto.FacebookHashtags),
+            NullIfWhiteSpace(dto.ImageScene),
+            NullIfWhiteSpace(dto.ImageCentralPerson),
+            CoverTextPlan.From(
+                dto.CoverHeadline, dto.CoverKeyPoints, dto.CoverTextPlacement, dto.CoverTextEmphasis));
     }
 
     private static IReadOnlyList<string> ParseSelfCheck(string text)
@@ -258,7 +327,13 @@ public sealed class GeminiDraftingAi(
         List<string?>? FlaggedClaims,
         double? Confidence,
         string? FacebookCaption,
-        List<string?>? FacebookHashtags);
+        List<string?>? FacebookHashtags,
+        string? ImageScene,
+        string? ImageCentralPerson,
+        string? CoverHeadline,
+        List<string?>? CoverKeyPoints,
+        string? CoverTextEmphasis,
+        string? CoverTextPlacement);
 
     /// <summary>Wire shape of the model's self-check JSON object.</summary>
     private sealed record SelfCheckDto(List<string?>? UnsupportedClaims);

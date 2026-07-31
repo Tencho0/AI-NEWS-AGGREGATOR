@@ -3,6 +3,7 @@ using System.Text.Json;
 using Dapper;
 
 using Newsroom.Core.Drafting;
+using Newsroom.Core.Images;
 using Newsroom.Core.Publishing;
 using Newsroom.Infrastructure.Database;
 
@@ -15,17 +16,24 @@ namespace Newsroom.Infrastructure.Repositories;
 /// flips an Approved draft to PublishFailed in the same transaction; a PartiallyPublished
 /// draft (site live, Facebook exhausted) keeps its status (docs/02-functional-spec.md §6).
 /// </summary>
-public sealed class PublishRepository(IDbConnectionFactory db) : IPublishRepository
+public sealed class PublishRepository(IDbConnectionFactory db, ImageStorage storage) : IPublishRepository
 {
     /// <summary>nw_PublishRecord.Status values.</summary>
     private const string SucceededStatus = "Succeeded";
     private const string FailedStatus = "Failed";
 
-    /// <summary>Editor uploads and AI-generated illustrations store a worker-local file path in
-    /// Url (downloaded from Telegram at attach time / saved at generation time); the publisher
-    /// inlines the file as base64 since the site cannot fetch it.</summary>
+    /// <summary>Editor uploads and AI-generated covers store a relative storage key in Url
+    /// (downloaded from Telegram at attach time / saved at generation time); the publisher inlines
+    /// the file as base64 since the site cannot fetch it. Pre-ADR-0013 rows hold absolute paths —
+    /// <see cref="ImageStorage.TryResolve"/> accepts both.</summary>
     private static bool IsLocalFileKind(string? kind) =>
         kind is ImageSourceKinds.EditorUpload or ImageSourceKinds.Ai;
+
+    /// <summary>Resolves a local storage key to an absolute path, or null when it does not resolve
+    /// inside the storage root (a traversal attempt or an orphaned legacy row) — the publisher then
+    /// treats the draft as having no image rather than reading an arbitrary file.</summary>
+    private string? LocalPathFor(string key) =>
+        storage.TryResolve(key, out var path) ? path : null;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -194,13 +202,16 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
     /// illustrations live on the worker's disk (sent as multipart bytes), everything else is a
     /// hosted URL Facebook fetches server-side. Null when the draft has no image — the
     /// publisher then posts text only.</summary>
-    private static FacebookImage? ToFacebookImage(string? kind, string? url)
+    private FacebookImage? ToFacebookImage(string? kind, string? url)
     {
         if (string.IsNullOrWhiteSpace(url))
             return null;
-        return IsLocalFileKind(kind)
-            ? new FacebookImage(Url: null, LocalPath: url, FileName: Path.GetFileName(url))
-            : new FacebookImage(Url: url, LocalPath: null, FileName: FileNameFromUrl(url));
+        if (!IsLocalFileKind(kind))
+            return new FacebookImage(Url: url, LocalPath: null, FileName: FileNameFromUrl(url));
+
+        return LocalPathFor(url) is { } path
+            ? new FacebookImage(Url: null, LocalPath: path, FileName: Path.GetFileName(path))
+            : null; // unresolvable key — post text only rather than reach outside the storage root
     }
 
     public async Task<FacebookPost?> GetFacebookPostForDraftAsync(long draftId, CancellationToken ct)
@@ -322,7 +333,7 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
         return exhausted;
     }
 
-    private static ArticleToPublish ToArticle(PublishRow r) => new(
+    private ArticleToPublish ToArticle(PublishRow r) => new(
         r.DraftId,
         r.PublishRef,
         r.Headline,
@@ -335,18 +346,19 @@ public sealed class PublishRepository(IDbConnectionFactory db) : IPublishReposit
         r.SeoDescription,
         ToImage(r));
 
-    private static PublishImage? ToImage(PublishRow r)
+    private PublishImage? ToImage(PublishRow r)
     {
         if (r.ImageUrl is null)
             return null;
         var altText = r.ImageAltTextBg ?? r.DraftAltTextBg ?? r.Headline;
-        return IsLocalFileKind(r.ImageKind)
+        if (!IsLocalFileKind(r.ImageKind))
+            return new PublishImage(
+                FileNameFromUrl(r.ImageUrl), r.ImageUrl, altText, r.ImageAttribution, LocalPath: null);
+
+        return LocalPathFor(r.ImageUrl) is { } path
             ? new PublishImage(
-                Path.GetFileName(r.ImageUrl), SourceUrl: null, altText, r.ImageAttribution,
-                LocalPath: r.ImageUrl)
-            : new PublishImage(
-                FileNameFromUrl(r.ImageUrl), r.ImageUrl, altText, r.ImageAttribution,
-                LocalPath: null);
+                Path.GetFileName(path), SourceUrl: null, altText, r.ImageAttribution, LocalPath: path)
+            : null; // unresolvable key — publish without a cover rather than reach outside the root
     }
 
     /// <summary>Derives a media file name from the image URL's last path segment;

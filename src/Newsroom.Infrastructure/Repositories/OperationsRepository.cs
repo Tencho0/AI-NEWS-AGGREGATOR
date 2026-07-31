@@ -194,6 +194,66 @@ public sealed class OperationsRepository(IDbConnectionFactory db) : IOperationsR
             });
     }
 
+    public async Task<IReadOnlyList<PrunableImage>> GetPrunableImagesAsync(
+        DateTime generatedCutoffUtc, DateTime uploadCutoffUtc, DateTime publishedCutoffUtc,
+        int maxCount, CancellationToken ct)
+    {
+        using var connection = await db.OpenAsync(ct);
+        // The status filter is the safety rail: only drafts that have finished their life appear,
+        // so nothing an editor is still working with can be pruned. Within that, each rule is one
+        // OR branch matching docs/05-integrations/images.md.
+        var rows = await connection.QueryAsync<PrunableImage>(
+            """
+            SELECT TOP (@maxCount)
+                   di.Id AS ImageId, di.Url AS StorageKey, di.SourceKind, d.Status AS DraftStatus
+            FROM dbo.nw_DraftImage di
+            JOIN dbo.nw_Draft d ON d.Id = di.DraftId
+            WHERE di.FilePrunedAtUtc IS NULL
+              AND di.SourceKind IN (@aiKind, @editorUploadKind)
+              AND d.Status IN (@rejected, @superseded, @expired, @generationFailed, @published)
+              AND (
+                    (di.SourceKind = @aiKind AND d.Status <> @published
+                     AND di.CreatedAtUtc < @generatedCutoffUtc)
+                 OR (di.SourceKind = @aiKind AND d.Status = @published AND di.Selected = 0
+                     AND di.CreatedAtUtc < @generatedCutoffUtc)
+                 OR (di.SourceKind = @editorUploadKind AND d.Status <> @published
+                     AND di.CreatedAtUtc < @uploadCutoffUtc)
+                 OR (d.Status = @published AND di.CreatedAtUtc < @publishedCutoffUtc)
+              )
+            ORDER BY di.Id
+            """,
+            new
+            {
+                maxCount,
+                generatedCutoffUtc,
+                uploadCutoffUtc,
+                publishedCutoffUtc,
+                aiKind = ImageSourceKinds.Ai,
+                editorUploadKind = ImageSourceKinds.EditorUpload,
+                rejected = nameof(DraftStatus.Rejected),
+                superseded = nameof(DraftStatus.Superseded),
+                expired = nameof(DraftStatus.Expired),
+                generationFailed = nameof(DraftStatus.GenerationFailed),
+                published = nameof(DraftStatus.Published),
+            });
+        return rows.ToList();
+    }
+
+    public async Task MarkImageFilesPrunedAsync(IReadOnlyList<long> imageIds, CancellationToken ct)
+    {
+        if (imageIds.Count == 0)
+            return;
+
+        using var connection = await db.OpenAsync(ct);
+        await connection.ExecuteAsync(
+            """
+            UPDATE dbo.nw_DraftImage
+            SET FilePrunedAtUtc = SYSUTCDATETIME()
+            WHERE Id IN @imageIds
+            """,
+            new { imageIds });
+    }
+
     private static int CountFor(List<(string Status, int Cnt)> rows, string status) =>
         rows.FirstOrDefault(r => string.Equals(r.Status, status, StringComparison.Ordinal)).Cnt;
 }

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.AI;
 using Newsroom.Core.Drafting;
+using Newsroom.Core.Images;
 using Newsroom.Infrastructure.Ai;
 
 namespace Newsroom.Infrastructure.Tests.Ai;
@@ -18,6 +19,12 @@ public class GeminiDraftingAiTests
           "seoTitle": "Трус в Югозапада",
           "seoDescription": "Земетресение бе усетено в Благоевград и региона.",
           "imageSearchQueries": ["earthquake damage", "seismograph"],
+          "imageScene": "residents standing in a Blagoevgrad street looking up at a cracked apartment facade in the early morning light",
+          "imageCentralPerson": "Иван Иванов",
+          "coverHeadline": "ТРУС В ЮГОЗАПАДА",
+          "coverKeyPoints": ["магнитуд 4.5", "0 пострадали"],
+          "coverTextEmphasis": "number",
+          "coverTextPlacement": "lower-left",
           "imageAltTextBg": "Сеизмограф записва трус",
           "flaggedClaims": ["Магнитудът от 4.5 идва само от един източник."],
           "confidence": 0.85,
@@ -41,9 +48,25 @@ public class GeminiDraftingAiTests
         "Благоевград", ["земетресение"], "Трус в Югозапада", "Земетресение в региона.",
         ["earthquake"], null, [], 0.85, "", []);
 
+    /// <summary>A bundle whose source text names the mayor — the public-figure candidate path.</summary>
+    private static TopicBundle BundleMentioningTheMayor() => new(
+        43,
+        "Ремонт на улица в Благоевград",
+        [
+            new TopicSourceArticle(3, "Кметът подписа договора", "БТА", "https://example.com/3",
+                new DateTime(2026, 7, 2), "Иван Иванов подписа договора за ремонта.",
+                "Кметът Иван Иванов подписа договора днес."),
+        ]);
+
+    private static PublicFigureDirectory Figures() => new(
+    [
+        new PublicFigure("Иван Иванов", "кмет на Благоевград", "ivanov.png", ["кметът Иванов"]),
+    ]);
+
     private static (GeminiDraftingAi Client, FakeChatClient DraftFake, FakeChatClient SelfCheckFake) CreateClient(
         string draftResponseText, string selfCheckResponseText = """{"unsupportedClaims": []}""",
-        UsageDetails? usage = null, GeminiDraftingOptions? options = null)
+        UsageDetails? usage = null, GeminiDraftingOptions? options = null,
+        PublicFigureDirectory? figures = null)
     {
         var draftFake = new FakeChatClient(new ChatResponse(
             new ChatMessage(ChatRole.Assistant, draftResponseText))
@@ -58,7 +81,8 @@ public class GeminiDraftingAiTests
             ModelId = "gemini-2.5-flash",
         });
         var client = new GeminiDraftingAi(draftFake, selfCheckFake, options ?? new GeminiDraftingOptions(),
-            new AiRateLimiter(requestsPerMinute: 1000)); // permissive: throttling is not under test
+            new AiRateLimiter(requestsPerMinute: 1000), // permissive: throttling is not under test
+            figures);
         return (client, draftFake, selfCheckFake);
     }
 
@@ -80,6 +104,12 @@ public class GeminiDraftingAiTests
         Assert.Equal(["земетресение", "Благоевград"], content.Tags);
         Assert.Equal("Трус в Югозапада", content.SeoTitle);
         Assert.Equal(["earthquake damage", "seismograph"], content.ImageSearchQueries);
+        Assert.StartsWith("residents standing in a Blagoevgrad street", content.ImageScene);
+        Assert.Equal("Иван Иванов", content.ImagePersonName);
+        Assert.Equal("ТРУС В ЮГОЗАПАДА", content.CoverText!.Headline);
+        Assert.Equal(["магнитуд 4.5", "0 пострадали"], content.CoverText.KeyPoints);
+        Assert.Equal(CoverTextEmphasis.Number, content.CoverText.Emphasis);
+        Assert.Equal(CoverTextPlacement.LowerLeft, content.CoverText.Placement);
         Assert.Equal("Сеизмограф записва трус", content.ImageAltTextBg);
         Assert.Single(content.FlaggedClaims);
         Assert.Equal(0.85, content.Confidence);
@@ -206,6 +236,86 @@ public class GeminiDraftingAiTests
         Assert.Contains("facebookCaption", systemPrompt);
         Assert.Contains("facebookHashtags", systemPrompt);
         Assert.Contains("БЕЗ главни букви", systemPrompt); // the hook line must not be ALL CAPS
+    }
+
+    [Fact]
+    public async Task Generate_prompt_asks_for_one_coherent_english_cover_scene()
+    {
+        var (client, fake, _) = CreateClient(ValidDraftJson);
+
+        await client.GenerateAsync(Bundle(), null, CancellationToken.None);
+
+        var systemPrompt = fake.LastMessages!.Single(m => m.Role == ChatRole.System).Text;
+        Assert.Contains("imageScene", systemPrompt);
+        Assert.Contains("ЕДНА свързана сцена на АНГЛИЙСКИ", systemPrompt);
+        Assert.Contains("кадър от репортаж", systemPrompt);
+        Assert.Contains("не като списък с ключови думи", systemPrompt);
+    }
+
+    [Fact]
+    public async Task Generate_prompt_asks_for_the_burnt_in_cover_headline_and_key_numbers()
+    {
+        var (client, fake, _) = CreateClient(ValidDraftJson);
+
+        await client.GenerateAsync(Bundle(), null, CancellationToken.None);
+
+        var systemPrompt = fake.LastMessages!.Single(m => m.Role == ChatRole.System).Text;
+        Assert.Contains("coverHeadline", systemPrompt);
+        Assert.Contains("coverKeyPoints", systemPrompt);
+        Assert.Contains("coverTextEmphasis", systemPrompt);
+        Assert.Contains("coverTextPlacement", systemPrompt);
+        Assert.Contains("ВЪРХУ корицата", systemPrompt);
+        Assert.Contains("lower-third", systemPrompt);           // the placement enum
+        Assert.Contains("Без изречения", systemPrompt);          // no paragraphs near the image model
+        Assert.Contains($"{CoverTextPlan.MaxHeadlineChars} знака", systemPrompt);
+    }
+
+    [Fact]
+    public async Task A_draft_without_cover_fields_gets_no_cover_text_at_all()
+    {
+        var (client, _, _) = CreateClient(
+            """{"headline":"ЗАГЛАВИЕ","bodyMarkdown":"Текст."}""");
+
+        var result = await client.GenerateAsync(Bundle(), null, CancellationToken.None);
+
+        Assert.Null(result.Content.CoverText);
+    }
+
+    [Fact]
+    public async Task Public_figures_named_in_the_sources_become_prompt_candidates()
+    {
+        var (client, fake, _) = CreateClient(ValidDraftJson, figures: Figures());
+
+        await client.GenerateAsync(BundleMentioningTheMayor(), null, CancellationToken.None);
+
+        var systemPrompt = fake.LastMessages!.Single(m => m.Role == ChatRole.System).Text;
+        Assert.Contains("imageCentralPerson", systemPrompt);
+        Assert.Contains("Иван Иванов (кмет на Благоевград)", systemPrompt);
+        Assert.Contains("наистина централен за събитието", systemPrompt);
+        Assert.Contains("символична сцена", systemPrompt);   // sensitive-story guidance
+    }
+
+    [Fact]
+    public async Task A_figure_the_sources_never_name_is_not_offered_to_the_model()
+    {
+        var (client, fake, _) = CreateClient(ValidDraftJson, figures: Figures());
+
+        await client.GenerateAsync(Bundle(), null, CancellationToken.None); // earthquake, no names
+
+        var systemPrompt = fake.LastMessages!.Single(m => m.Role == ChatRole.System).Text;
+        Assert.DoesNotContain("imageCentralPerson", systemPrompt);
+        Assert.DoesNotContain("Иван Иванов", systemPrompt);
+    }
+
+    [Fact]
+    public async Task With_no_configured_figures_the_person_field_is_never_requested()
+    {
+        var (client, fake, _) = CreateClient(ValidDraftJson);
+
+        await client.GenerateAsync(BundleMentioningTheMayor(), null, CancellationToken.None);
+
+        var systemPrompt = fake.LastMessages!.Single(m => m.Role == ChatRole.System).Text;
+        Assert.DoesNotContain("imageCentralPerson", systemPrompt);
     }
 
     [Fact]

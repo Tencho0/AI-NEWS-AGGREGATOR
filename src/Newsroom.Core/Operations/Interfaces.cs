@@ -15,6 +15,19 @@ public interface IJobHeartbeat
 }
 
 /// <summary>
+/// Out-of-band operator notification for conditions the pipeline must not silently absorb —
+/// today the free-tier image quota running out (ADR-0012: the worker never falls forward onto a
+/// billable model, it tells the editor and stops generating for the day). Implementations are
+/// best-effort like every Telegram notification: a failed send is logged, never thrown.
+/// </summary>
+public interface IOperatorAlerts
+{
+    /// <summary>Sends <paramref name="message"/> (plain Bulgarian text; the implementation
+    /// escapes it) to the review chat. Never throws except on cancellation.</summary>
+    Task RaiseAsync(string message, CancellationToken ct);
+}
+
+/// <summary>
 /// Persistence for the ops jobs (watchdog, daily digest, retention, startup crash recovery —
 /// docs/07-operations.md). Everything is keyed on nw_Config or plain aggregate queries; no
 /// job state lives in memory, so restarts are safe by design.
@@ -48,4 +61,31 @@ public interface IOperationsRepository
     /// UpdatedAtUtc is older than <paramref name="cutoffUtc"/> flip to 'GenerationFailed' with
     /// <paramref name="error"/>. Returns the number of recovered drafts.</summary>
     Task<int> FailStuckGeneratingDraftsAsync(DateTime cutoffUtc, string error, CancellationToken ct);
+
+    /// <summary>
+    /// Local image files the retention pass may delete (ADR-0013). Only rows whose draft has
+    /// **resolved** are ever returned — a draft still awaiting approval, editing, scheduling or
+    /// publication keeps every image it has, selected or not. Rows already pruned are skipped.
+    /// <list type="bullet">
+    /// <item>generated covers on a discarded draft (Rejected/Superseded/Expired/GenerationFailed),
+    /// and unselected generated covers on a published one, older than
+    /// <paramref name="generatedCutoffUtc"/>;</item>
+    /// <item>editor uploads on a discarded draft older than <paramref name="uploadCutoffUtc"/>;</item>
+    /// <item>anything local on a Published draft older than <paramref name="publishedCutoffUtc"/> —
+    /// Umbraco holds the durable copy by then.</item>
+    /// </list>
+    /// Public-figure reference photos are never in nw_DraftImage, so they can never appear here.
+    /// </summary>
+    Task<IReadOnlyList<PrunableImage>> GetPrunableImagesAsync(
+        DateTime generatedCutoffUtc, DateTime uploadCutoffUtc, DateTime publishedCutoffUtc,
+        int maxCount, CancellationToken ct);
+
+    /// <summary>Stamps FilePrunedAtUtc on the rows whose files were deleted, so the next pass skips
+    /// them. The rows themselves are kept as the audit trail.</summary>
+    Task MarkImageFilesPrunedAsync(IReadOnlyList<long> imageIds, CancellationToken ct);
 }
+
+/// <summary>One nw_DraftImage row the retention pass may delete the file of.</summary>
+/// <param name="StorageKey">nw_DraftImage.Url — a relative storage key, or a pre-ADR-0013
+/// absolute path.</param>
+public sealed record PrunableImage(long ImageId, string StorageKey, string SourceKind, string DraftStatus);

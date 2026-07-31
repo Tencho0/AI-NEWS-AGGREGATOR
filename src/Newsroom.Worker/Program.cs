@@ -1,6 +1,7 @@
 using System.Net;
 using Newsroom.Core.Ai;
 using Newsroom.Core.Drafting;
+using Newsroom.Core.Images;
 using Newsroom.Core.Operations;
 using Newsroom.Core.Publishing;
 using Newsroom.Core.Review;
@@ -9,6 +10,7 @@ using Newsroom.Core.Trends;
 using Newsroom.Infrastructure.Ai;
 using Newsroom.Infrastructure.Database;
 using Newsroom.Infrastructure.Images;
+using Newsroom.Infrastructure.Operations;
 using Newsroom.Infrastructure.Publishing;
 using Newsroom.Infrastructure.Repositories;
 using Newsroom.Infrastructure.Review;
@@ -101,23 +103,35 @@ try
         GeminiChatClientFactory.CreateWithDailyQuotaFallback(builder.Configuration, "SelfCheck",
             provider.GetRequiredService<GeminiModelFallback>()),
         GeminiDraftingOptions.From(builder.Configuration),
-        provider.GetRequiredService<AiRateLimiter>())));
+        provider.GetRequiredService<AiRateLimiter>(),
+        provider.GetRequiredService<PublicFigureDirectory>())));
 
     builder.Services.AddHttpClient(ImageSuggestionService.HttpClientName,
             client => client.Timeout = TimeSpan.FromSeconds(15))
         .AddStandardResilienceHandler();
     builder.Services.AddSingleton(ImagesOptions.From(builder.Configuration));
+    // Persistent image storage (ADR-0013): every local image file lives under Images:StorageRoot,
+    // outside this deployment directory, and nw_DraftImage.Url holds a relative key into it.
+    builder.Services.AddSingleton(ImageStorageOptions.From(builder.Configuration));
+    builder.Services.AddSingleton(provider =>
+        provider.GetRequiredService<ImageStorageOptions>().CreateStorage());
+    builder.Services.AddSingleton<ImageCompositor>();
     builder.Services.AddSingleton<IImageProvider, PixabayImageProvider>();
     builder.Services.AddSingleton<IImageProvider, PexelsImageProvider>();
     builder.Services.AddSingleton<ImageSuggestionService>();
 
-    // Cover-image generation (ADR-0011): FLUX.1 Schnell on Cloudflare Workers AI, tried before
-    // the stock providers. Its client gets a generation-friendly timeout and NO resilience
-    // handler — a failed generation must fall back to stock, not burn quota on retries.
+    // Cover-image generation (ADR-0011, ADR-0012): FLUX.2 klein 4B on Cloudflare Workers AI,
+    // tried before the stock providers. Its client gets a generation-friendly timeout and NO
+    // resilience handler — a failed generation must fall back to stock, not burn quota on
+    // retries. FeaturedImageService is a singleton because it remembers, for the rest of the UTC
+    // day, that the free allocation ran out.
     builder.Services.AddHttpClient(CloudflareFluxImageGenerator.HttpClientName,
         client => client.Timeout = TimeSpan.FromSeconds(60));
     builder.Services.AddSingleton(CloudflareImagesOptions.From(builder.Configuration));
+    builder.Services.AddSingleton(provider =>
+        new PublicFigureDirectory(provider.GetRequiredService<CloudflareImagesOptions>().PublicFigures));
     builder.Services.AddSingleton<IAiImageGenerator, CloudflareFluxImageGenerator>();
+    builder.Services.AddSingleton<IOperatorAlerts, TelegramOperatorAlerts>();
     builder.Services.AddSingleton<FeaturedImageService>();
 
     // Telegram editorial review (docs/02-functional-spec.md §5, ADR-0006: long polling). The

@@ -31,4 +31,6 @@ Small decisions that don't warrant an ADR get a one-liner directly in the decisi
 | [0008](0008-facebook-page-only.md) | Facebook: Page publishing only; no group automation | Proposed |
 | [0009](0009-image-sourcing-rules.md) | Image sourcing rules (no scraped images) | Proposed |
 | [0010](0010-provider-agnostic-ai-gemini-default.md) | Provider-agnostic AI layer; Gemini (free tier) as default provider | Accepted |
-| [0011](0011-cloudflare-flux-image-generation.md) | Cloudflare Workers AI (FLUX.1 Schnell) for cover-image generation | Accepted |
+| [0011](0011-cloudflare-flux-image-generation.md) | Cloudflare Workers AI (FLUX.1 Schnell) for cover-image generation | Accepted (style/model superseded by 0012) |
+| [0012](0012-photoreal-covers-and-public-figures.md) | Photoreal cinematic covers on FLUX.2 klein 4B; public figures only from approved reference photos | Accepted |
+| [0013](0013-burnt-in-cover-text-and-persistent-image-storage.md) | Burnt-in cover headline/key numbers, local logo compositing, persistent image storage with retention, code-based quota classification | Accepted |

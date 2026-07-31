@@ -1,6 +1,7 @@
 using System.Globalization;
 
 using Newsroom.Core.Drafting;
+using Newsroom.Core.Images;
 using Newsroom.Core.Operations;
 using Newsroom.Core.Publishing;
 using Newsroom.Core.Review;
@@ -25,6 +26,7 @@ public sealed class TelegramJob(
     IDraftRepository drafts,
     Lazy<ITelegramGateway> gateway,
     IJobHeartbeat heartbeat,
+    ImageStorage storage,
     IConfiguration configuration,
     ILogger<TelegramJob> logger) : BackgroundService
 {
@@ -51,9 +53,9 @@ public sealed class TelegramJob(
         "🖼 друга снимка · ❌ откажи. " +
         "Отговор с текст = инструкции за промяна; отговор със снимка = прикачи снимка.";
 
-    /// <summary>Where editor photo uploads land (Images:EditorUploadDir; a relative value is
-    /// resolved against the worker's base directory so publish-time reads find the files).</summary>
-    private readonly string editorUploadDir = ResolveEditorUploadDir(configuration);
+    /// <summary>Where editor photo uploads land — the editor-upload area of the persistent image
+    /// storage root (ADR-0013), not the disposable install directory.</summary>
+    private readonly string editorUploadDir = storage.EnsureDirectory(storage.EditorUploadArea);
 
     private DateTime lastSweepUtc = DateTime.MinValue;
 
@@ -589,12 +591,6 @@ public sealed class TelegramJob(
         gateway.Value.SendHtmlAsync(
             chatId, ReviewMessageRenderer.Escape(text), withReviewButtons: false, draftIdForButtons: null,
             scheduleButtonLabel: null, ct);
-
-    private static string ResolveEditorUploadDir(IConfiguration configuration)
-    {
-        var dir = ImagesOptions.From(configuration).EditorUploadDir;
-        return Path.IsPathRooted(dir) ? dir : Path.Combine(AppContext.BaseDirectory, dir);
-    }
 
     /// <summary>Label for the 📅 button ("📅 Насрочи 17:30" / "…утре 08:15"). Advisory — the
     /// slot is recomputed at press time. Best-effort: a failure falls back to a bare label.</summary>

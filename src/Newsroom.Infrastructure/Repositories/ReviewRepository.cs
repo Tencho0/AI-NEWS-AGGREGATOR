@@ -7,6 +7,7 @@ using Dapper;
 using Microsoft.Extensions.Configuration;
 
 using Newsroom.Core.Drafting;
+using Newsroom.Core.Images;
 using Newsroom.Core.Publishing;
 using Newsroom.Core.Review;
 using Newsroom.Core.Scraping;
@@ -22,7 +23,8 @@ namespace Newsroom.Infrastructure.Repositories;
 /// false, and every successful transition writes its nw_ReviewAction row in the same
 /// transaction (docs/05-integrations/telegram.md interaction rules).
 /// </summary>
-public sealed class ReviewRepository(IDbConnectionFactory db, IConfiguration configuration) : IReviewRepository
+public sealed class ReviewRepository(
+    IDbConnectionFactory db, IConfiguration configuration, ImageStorage storage) : IReviewRepository
 {
     private const string UpdateOffsetKey = "Telegram:UpdateOffset";
     private const string ChangeInstructionsKind = "ChangeInstructions";
@@ -153,9 +155,16 @@ public sealed class ReviewRepository(IDbConnectionFactory db, IConfiguration con
                 aiKind = ImageSourceKinds.Ai,
                 pendingStatus = nameof(DraftStatus.PendingReview),
             });
+        // An AI cover's Url is a relative storage key (pre-ADR-0013 rows: an absolute path);
+        // resolve it here so the dispatcher only ever sees a real path. A key that does not resolve
+        // inside the storage root is dropped rather than handed to the uploader.
         return rows
-            .Select(r => (r.DraftId, r.Url, ComposeImageCaption(r.Attribution, r.AltTextBg), r.Total,
-                r.SourceKind == ImageSourceKinds.Ai))
+            .Select(r => r.SourceKind == ImageSourceKinds.Ai
+                ? (r.DraftId, Path: storage.TryResolve(r.Url, out var path) ? path : "", IsLocal: true, r)
+                : (r.DraftId, Path: r.Url, IsLocal: false, r))
+            .Where(x => x.Path.Length > 0)
+            .Select(x => (x.DraftId, x.Path,
+                ComposeImageCaption(x.r.Attribution, x.r.AltTextBg), x.r.Total, x.IsLocal))
             .ToList();
     }
 
@@ -262,9 +271,11 @@ public sealed class ReviewRepository(IDbConnectionFactory db, IConfiguration con
         if (isPending == 0)
             return false; // resolved while the photo travelled; transaction rolls back
 
-        // The upload wins selection over every suggestion (docs/05 interaction rules). Url is
-        // the worker-local file the publisher inlines; ThumbUrl keeps the Telegram file_id so
-        // the chat can re-show the photo without re-uploading.
+        // The upload wins selection over every suggestion (docs/05 interaction rules). Url is the
+        // relative storage key of the downloaded file (ADR-0013 — never an absolute path, so the
+        // storage root can move); ThumbUrl keeps the Telegram file_id so the chat can re-show the
+        // photo without re-uploading.
+        var key = storage.KeyFor(localPath);
         await connection.ExecuteAsync(
             """
             UPDATE dbo.nw_DraftImage SET Selected = 0 WHERE DraftId = @draftId AND Selected = 1;
@@ -277,7 +288,7 @@ public sealed class ReviewRepository(IDbConnectionFactory db, IConfiguration con
             {
                 draftId,
                 kind = ImageSourceKinds.EditorUpload,
-                url = Truncate(localPath, 2000),
+                url = Truncate(key, 2000),
                 thumbUrl = Truncate(fileId, 2000),
                 attribution = EditorUploadAttribution,
             },

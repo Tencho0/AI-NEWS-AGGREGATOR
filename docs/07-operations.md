@@ -48,6 +48,27 @@ new ADR — deliberately out of v1.
 5. **Human escalation is a feature:** every failure that stops an item is visible in Telegram
    with the minimal action needed (retry button / instruction).
 
+## Persistent storage (ADR-0013)
+
+**The worker's install directory is disposable. Image files are not.**
+
+Generated covers, editor uploads and the approved public-figure reference portraits all live under
+`Images:StorageRoot`, deliberately outside the deployment directory so a redeploy, a service
+reinstall or a `bin` wipe cannot destroy a pending draft's cover.
+
+- **Production must point `Images:StorageRoot` at a persistent mounted volume**, configured *before*
+  drafts are generated. Left unset it defaults to `%ProgramData%\PredelNewsroom\images` on whichever
+  host runs the service — fine for a single-box dev install, not for anything that gets
+  redeployed or moved.
+- `nw_DraftImage.Url` stores a relative key into that root, so the root can move without rewriting
+  rows. Rows written before ADR-0013 hold absolute paths under the old install directory; they still
+  resolve, but only while that directory exists. Migrating the root means copying the three area
+  folders across, not editing the database.
+- The volume needs room for roughly 14–30 days of covers at ~200 KB each (the daily retention pass
+  prunes on that schedule — see docs/05-integrations/images.md). `public-figures/` and the logo asset
+  are never pruned automatically.
+- Back up `public-figures/` and the logo: they are hand-curated inputs that cannot be regenerated.
+
 ## Runbooks (grow in `docs/runbooks/` as incidents happen)
 
 Planned from day 1:

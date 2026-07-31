@@ -29,6 +29,9 @@ public static class DraftValidator
         SeoDescription = TruncateAtWordBoundary(draft.SeoDescription.Trim(), MaxSeoDescriptionChars),
         FacebookCaption = draft.FacebookCaption.Trim(),
         FacebookHashtags = NormalizeHashtags(draft.FacebookHashtags),
+        // Cover text is re-capped rather than validated: an over-long headline is trimmed to
+        // something the image model can render, and an empty one just means a text-free cover.
+        CoverText = draft.CoverText?.Normalized() is { HasText: true } cover ? cover : null,
     };
 
     /// <summary>Repairs safely-fixable hashtag issues: missing leading '#', duplicates (case-
