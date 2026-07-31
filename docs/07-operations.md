@@ -67,12 +67,14 @@ reinstall or a `bin` wipe cannot destroy a pending draft's cover.
 - The volume needs room for roughly 14–30 days of covers at ~200 KB each (the daily retention pass
   prunes on that schedule — see docs/05-integrations/images.md). `public-figures/` and the logo asset
   are never pruned automatically.
-- Back up `public-figures/` and the logo: they are hand-curated inputs that cannot be regenerated.
+- Back up `public-figures/` and `branding/`: they are hand-curated inputs that cannot be
+  regenerated. Adding to them is [runbooks/add-a-public-figure.md](runbooks/add-a-public-figure.md).
 
 ## Runbooks (grow in `docs/runbooks/` as incidents happen)
 
 Planned from day 1:
 - `facebook-token-renewal.md` — re-auth steps when the Page token dies.
 - `add-a-source.md` — source onboarding checklist (feed check, ToS check, parser hint, test poll).
+- `add-a-public-figure.md` — reference portrait + allow-list entry before a real face can be drawn.
 - `restore-after-vps-restart.md` — service auto-start verification, health checklist.
 - `cost-cap-hit.md` — how to raise/inspect the cap, find the expensive stage.

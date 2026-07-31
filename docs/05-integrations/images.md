@@ -150,6 +150,31 @@ scene; imply no guilt, arrest, detention, confrontation or misconduct. Everyone 
 ordinary fictional person with a non-identifiable face — which is also the whole-frame rule whenever
 any gate fails.
 
+## Reference portraits — where they come from (ADR-0012)
+
+The allow-list is only half the gate; the photo behind each entry is the other half. Step-by-step
+onboarding lives in [runbooks/add-a-public-figure.md](../runbooks/add-a-public-figure.md). The rules
+that constrain it:
+
+- **Never a scraped press photo** — the hard rule at the top of this document applies here most
+  sharply, because a reference portrait is reused on every cover that person appears on. In practice
+  the workable sources are Wikidata `P18` → Wikimedia Commons, an official institutional portrait,
+  or a photo the outlet owns.
+- **The licence travels with the file.** Commons portraits are mostly CC BY variants, which oblige
+  us to attribute the photographer wherever the derived cover is published. Record licence and
+  author per file when you add it — the file itself carries no such metadata, and a portrait whose
+  provenance nobody wrote down cannot be defended later.
+- **Verify the face, not just the name.** Bulgarian names collide hard, and prominence is a bad
+  proxy for relevance: ranking Wikidata matches by sitelink count picks the footballer over the
+  minister (Костадин Костадинов, Петър Витанов, Георги Пеев all resolve that way), and one name
+  matched 38 distinct people. A wrong face on a cover is worse than no face — when a name cannot be
+  disambiguated with confidence, leave it off the allow-list.
+- **Size is not your problem.** Anything above 512×512 is downscaled at generation time
+  (aspect-preserving, long side 511). Do not pre-shrink, and never upscale a small portrait.
+- **A figure with no photo can never be depicted.** `ReadPublicFigures` drops entries without a
+  `ReferenceImage`, so an unphotographed figure simply falls through to the anonymous-cover path
+  rather than risking a name-only likeness.
+
 ## Cost safety and failure classification (ADR-0012, ADR-0013)
 
 The Workers AI free daily allocation is a ceiling, not a starting point. Failures are classified by
@@ -167,13 +192,39 @@ Nothing in the pipeline escalates to a billable model or enables paid billing.
 ## Where the files live (ADR-0013)
 
 `Images:StorageRoot` is a **persistent location outside the worker's deployment directory** —
-`%ProgramData%\PredelNewsroom\images` by default. It holds three areas:
+`%ProgramData%\PredelNewsroom\images` by default. It holds three managed areas plus the branding
+asset:
 
 | Area | Config | Contents | Retention |
 |---|---|---|---|
 | `generated-images` | `Images:Cloudflare:GeneratedImageDir` | AI covers | pruned, see below |
 | `editor-uploads` | `Images:EditorUploadDir` | Telegram photo replies | pruned, see below |
 | `public-figures` | `Images:Cloudflare:ReferenceImageDir` | approved reference portraits | **never pruned** |
+| `branding` | the folder half of `Images:Cover:LogoFile` | the logo composited onto every cover | **never pruned** |
+
+The default layout on a Windows box, all of it outside the repo and outside the install directory:
+
+```text
+%ProgramData%\PredelNewsroom\images\
+├── generated-images\                 AI covers (pruned)
+├── editor-uploads\                   Telegram photo replies (pruned)
+├── public-figures\                   approved reference portraits, e.g. Румен_Радев.jpg
+│                                     — file names are what Images:PublicFigures[].ReferenceImage
+│                                       references verbatim; Cyrillic is fine
+└── branding\
+    └── predel-news-logo.png          Images:Cover:LogoFile — transparent PNG
+```
+
+Only the **three areas** are named settings validated at startup. The logo is an ordinary storage
+key: `ImageStorage.TryResolve` accepts any relative path that stays inside the root, so
+`branding/predel-news-logo.png` needs no area of its own. Point `Images:Cover:LogoFile` anywhere
+inside the root and it resolves; point it outside and it is refused like a traversal attempt, and
+the cover is composited without a logo (a warning, never a lost cover).
+
+**The logo must have an alpha channel.** `ImageCompositor.OverlayLogo` draws it with SkiaSharp
+straight onto the cover, so an opaque JPEG paints a solid rectangle in the corner. Crop the
+transparent padding too: `LogoWidthPercent` sizes the *whole image*, so a mark that fills only part
+of its canvas renders proportionally smaller than the number suggests.
 
 > **Production requires a persistent mounted volume for `Images:StorageRoot`, and the worker install
 > directory must stay disposable.** A redeploy, service reinstall or `bin` wipe must never take
