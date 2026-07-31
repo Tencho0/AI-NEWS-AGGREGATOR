@@ -59,6 +59,19 @@ IF NOT EXISTS (SELECT 1 FROM dbo.nw_Source WHERE Url = N'<FEED-URL>')
 
 For seeding several sources at once use the template [`tools/seed-sources.sql`](../../tools/seed-sources.sql).
 
+> **⚠ Run SQL files as UTF-8.** `sqlcmd` decodes an input file with the client ANSI codepage
+> (1252 on the VPS) unless the file has a UTF-8 BOM or you pass `-f 65001`. Get this wrong and
+> `N'БТА'` reaches SQL Server already mojibake (`Ð‘Ð¢Ð`) and `nvarchar` stores it verbatim — the
+> insert succeeds, nothing warns you, and the name is wrong everywhere it is displayed. This cost
+> us migration `0015_fix_source_name_encoding`. Always:
+>
+> ```powershell
+> sqlcmd -S .\SQLEXPRESS -d Newsroom -E -f 65001 -i tools\seed-sources.sql
+> ```
+>
+> Pasting the statement into SSMS or Azure Data Studio is safe — the codepage trap is `sqlcmd -i`
+> only.
+
 ## 6. Verify after adding
 
 Within one poll interval (plus up to `Scrape:CheckSeconds` = 60 s):
@@ -88,3 +101,15 @@ Within one poll interval (plus up to `Scrape:CheckSeconds` = 60 s):
    `LastError` must be `NULL` and `ConsecutiveFailures` 0. Remember the auto-disable rule:
    3 consecutive failures + no success for 24 h → `Enabled = 0` (re-enable manually after
    fixing the cause).
+4. **Name encoding** — must return **zero rows**:
+
+   ```sql
+   SELECT Id, Name FROM dbo.nw_Source
+   WHERE Name COLLATE Latin1_General_BIN2 LIKE N'%' + NCHAR(0x00D0) + N'%'
+      OR Name COLLATE Latin1_General_BIN2 LIKE N'%' + NCHAR(0x00D1) + N'%';
+   ```
+
+   A hit means step 5's encoding warning applies: the name is stored as mojibake. Fix it with an
+   explicit `UPDATE` (the `IF NOT EXISTS` guard will not re-seed an existing row), then re-check.
+   Eyeballing the name in a console is not enough — the terminal can mangle output on its own,
+   which is why this check is a query and not a look.

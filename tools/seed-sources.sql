@@ -1,5 +1,15 @@
--- =============================================================================
+﻿-- =============================================================================
 -- seed-sources.sql — production seed for dbo.nw_Source
+--
+-- ⚠ ENCODING — run this file as UTF-8 or the Cyrillic names land as mojibake:
+--
+--     sqlcmd -S .\SQLEXPRESS -d Newsroom -E -f 65001 -i tools\seed-sources.sql
+--
+-- Without -f 65001, sqlcmd decodes the file with the client ANSI codepage (1252
+-- on this box), so N'БТА' is already 'Ð‘Ð¢Ð' before SQL Server sees it and
+-- nvarchar stores that verbatim. This file is saved with a UTF-8 BOM, which
+-- makes sqlcmd get it right even when -f is forgotten — keep the BOM. Migration
+-- 0015_fix_source_name_encoding repaired the rows seeded before that was known.
 --
 -- Q-1 resolved by the owner on 2026-07-03. Feeds verified with the bot UA the
 -- same day (see docs/decision-log.md). Idempotent: every insert is guarded by
@@ -45,3 +55,10 @@ IF NOT EXISTS (SELECT 1 FROM dbo.nw_Source WHERE Url = N'https://www.blagoevgrad
 -- Post-seed sanity check:
 SELECT Id, Name, Kind, Url, IntervalMinutes, Enabled, PolitenessDelaySeconds
 FROM dbo.nw_Source ORDER BY Id;
+
+-- Encoding check — must return zero rows. 'Ð'/'Ñ' never occur in Bulgarian, so a hit
+-- means the file was decoded as CP1252 on the way in (see the ENCODING note above):
+-- fix the invocation and re-run the UPDATEs, the IF NOT EXISTS guards will not do it.
+SELECT Id, Name FROM dbo.nw_Source
+WHERE Name COLLATE Latin1_General_BIN2 LIKE N'%' + NCHAR(0x00D0) + N'%'
+   OR Name COLLATE Latin1_General_BIN2 LIKE N'%' + NCHAR(0x00D1) + N'%';
