@@ -49,6 +49,16 @@ $dir = Resolve-Path "src\Newsroom.Worker\bin\Debug\net10.0"
 Start-Process -FilePath "$dir\Newsroom.Worker.exe" -WorkingDirectory $dir -WindowStyle Hidden
 ```
 
+**One-liner for the whole restart** — `tools\restart-worker.ps1` does exactly the above, after
+stopping any running instance (section 4) and checking the new one stayed up:
+
+```powershell
+.\tools\restart-worker.ps1
+```
+
+If the running instance was started from an *elevated* prompt, a normal session cannot kill it; the
+script asks for elevation (UAC) for the stop step only, so the worker comes back up unelevated.
+
 It now runs independently. Logs go to `src\Newsroom.Worker\bin\Debug\net10.0\logs\newsroom-<date>.log`
 (there is no live console, so watch the log file — see section 3).
 
