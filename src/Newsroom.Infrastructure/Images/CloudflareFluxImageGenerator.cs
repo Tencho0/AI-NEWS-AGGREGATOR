@@ -87,8 +87,12 @@ public sealed class CloudflareFluxImageGenerator(
             throw new CloudflareAiException("Cloudflare Workers AI is not configured (Images:Cloudflare:AccountId / ApiToken).");
 
         var reference = ResolvePersonReference(content);
+        // Dropping the plan is exactly how ADR-0013 specifies a text-free cover — the composer
+        // treats "no usable headline" and "text switched off" identically, so the no-text fences
+        // and the never-render-this context line come for free.
+        var forPrompt = options.BurnInCoverText ? content : content with { CoverText = null };
         var prompt = FluxPromptComposer.Compose(
-            content,
+            forPrompt,
             reference is null ? null : new CoverPersonBrief(reference.Figure.Name, reference.Figure.Role),
             options.LogoCorner);
 

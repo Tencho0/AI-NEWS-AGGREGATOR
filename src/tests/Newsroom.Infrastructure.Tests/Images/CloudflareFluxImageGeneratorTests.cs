@@ -58,7 +58,8 @@ public class CloudflareFluxImageGeneratorTests : IDisposable
         IReadOnlyList<PublicFigure>? figures = null,
         bool allowInSensitive = false,
         string logoFile = "",
-        int transientRetries = 2)
+        int transientRetries = 2,
+        bool burnInCoverText = true)
     {
         var storage = NewStorage();
         var handler = new CannedResponseHandler(json.Length > 0 ? json : SuccessJson, statusCode);
@@ -77,6 +78,7 @@ public class CloudflareFluxImageGeneratorTests : IDisposable
                 LogoFile = logoFile,
                 PublicFigures = figures ?? [],
                 AllowPublicFiguresInSensitiveCategories = allowInSensitive,
+                BurnInCoverText = burnInCoverText,
             },
             storage,
             new ImageCompositor(NullLogger<ImageCompositor>.Instance),
@@ -175,6 +177,24 @@ public class CloudflareFluxImageGeneratorTests : IDisposable
         Assert.Contains("\"ПОЖАР В ПЕТРИЧ\"", body);
         Assert.Contains("\"3 сгради\"", body);
         Assert.Contains("no logo, wordmark, brand name or watermark", body);
+    }
+
+    /// <summary>Images:Cover:BurnInText=false — FLUX.2 klein cannot spell Cyrillic (live 2026-07-31:
+    /// "Обновени сгради" came back as "Обоввейк сргади"), so no glyphs are requested at all until the
+    /// local renderer lands. The headline may still travel as context the model must not draw.</summary>
+    [Fact]
+    public async Task Cover_text_is_withheld_from_the_model_when_burn_in_is_switched_off()
+    {
+        var (generator, handler, _) = CreateGenerator(burnInCoverText: false);
+
+        await generator.GenerateAsync(
+            Draft(coverText: new CoverTextPlan("ПОЖАР В ПЕТРИЧ", ["3 сгради"])), CancellationToken.None);
+
+        var body = handler.LastRequestBody!;
+        Assert.DoesNotContain("\"ПОЖАР В ПЕТРИЧ\"", body);
+        Assert.DoesNotContain("\"3 сгради\"", body);
+        Assert.DoesNotContain("Render text into the image", body);
+        Assert.Contains("never render it as text", body);
     }
 
     [Fact]

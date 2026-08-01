@@ -69,6 +69,17 @@ public sealed record CloudflareImagesOptions
     /// <summary>Logo margin from both edges, as a percentage of the cover width.</summary>
     public double LogoMarginPercent { get; init; } = 3;
 
+    /// <summary>
+    /// Whether the image model is asked to burn the cover-text plan into the picture (ADR-0013).
+    /// Off since 2026-07-31: FLUX.2 klein cannot spell Cyrillic — live output rendered
+    /// "Обновени сгради" as "Обоввейк сргади" and "икономия" as "иономітё", using і and ё, which
+    /// are not Bulgarian letters at all. ADR-0013 pre-committed this switch ("if misspellings turn
+    /// out to be frequent … the prompt drops back to text-free") until the local text renderer
+    /// lands. Off takes the composer's already-supported text-free path: no glyphs are requested,
+    /// and the headline is passed as context the model must not render.
+    /// </summary>
+    public bool BurnInCoverText { get; init; } = true;
+
     /// <summary>Public figures whose likeness may appear on a cover (ADR-0012). Empty — the
     /// default — means covers never depict a real identifiable person.</summary>
     public IReadOnlyList<PublicFigure> PublicFigures { get; init; } = [];
@@ -94,6 +105,7 @@ public sealed record CloudflareImagesOptions
         LogoCorner = configuration.GetValue("Images:Cover:LogoCorner", CoverLogoCorner.UpperRight),
         LogoWidthPercent = configuration.GetValue("Images:Cover:LogoWidthPercent", 16d),
         LogoMarginPercent = configuration.GetValue("Images:Cover:LogoMarginPercent", 3d),
+        BurnInCoverText = configuration.GetValue("Images:Cover:BurnInText", true),
         PublicFigures = ReadPublicFigures(configuration),
         AllowPublicFiguresInSensitiveCategories = configuration.GetValue(
             "Images:Cloudflare:AllowPublicFiguresInSensitiveCategories", false),
