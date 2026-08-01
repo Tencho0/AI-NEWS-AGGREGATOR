@@ -174,8 +174,9 @@ public interface IReviewRepository
     /// today's articles by status, open topics, drafts by status, today's AI usage, last heartbeat.</summary>
     Task<string> BuildStatusSummaryAsync(CancellationToken ct);
 
-    /// <summary>Bulgarian /topics summary: top open topics by score with id, label, score and
-    /// article count (plain text — the caller escapes).</summary>
+    /// <summary>Bulgarian /topics summary: top open topics by score with id, label, score,
+    /// article count and when the topic was first seen, in local time (plain text — the caller
+    /// escapes).</summary>
     Task<string> BuildTopicsSummaryAsync(int max, CancellationToken ct);
 
     /// <summary>Mutes the topic for <paramref name="hours"/>. False when the topic id is unknown.</summary>

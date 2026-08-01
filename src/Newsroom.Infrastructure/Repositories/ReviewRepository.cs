@@ -594,9 +594,9 @@ public sealed class ReviewRepository(
     public async Task<string> BuildTopicsSummaryAsync(int max, CancellationToken ct)
     {
         using var connection = await db.OpenAsync(ct);
-        var topics = (await connection.QueryAsync<(int Id, string Label, double Score, string Status, int Articles)>(
+        var topics = (await connection.QueryAsync<(int Id, string Label, double Score, string Status, DateTime FirstSeenAtUtc, int Articles)>(
             """
-            SELECT TOP (@max) t.Id, t.Label, t.Score, t.Status,
+            SELECT TOP (@max) t.Id, t.Label, t.Score, t.Status, t.FirstSeenAtUtc,
                    (SELECT COUNT(*) FROM dbo.nw_TopicArticle ta WHERE ta.TopicId = t.Id) AS Articles
             FROM dbo.nw_Topic t
             WHERE t.Status NOT IN (@doneStatus, @manualStatus)
@@ -607,6 +607,7 @@ public sealed class ReviewRepository(
         if (topics.Count == 0)
             return "Няма отворени теми.";
 
+        var nowLocal = DateTime.Now;
         var summary = new StringBuilder();
         summary.Append("🔥 Отворени теми (топ ").Append(topics.Count).Append("):");
         foreach (var topic in topics)
@@ -614,7 +615,9 @@ public sealed class ReviewRepository(
             summary.Append('\n').Append('#').Append(topic.Id).Append(' ').Append(topic.Label)
                 .Append(" — ").Append(topic.Score.ToString("0.0", CultureInfo.InvariantCulture))
                 .Append(" (").Append(topic.Status).Append(", ").Append(topic.Articles)
-                .Append(topic.Articles == 1 ? " статия)" : " статии)");
+                .Append(topic.Articles == 1 ? " статия" : " статии")
+                .Append(", от ").Append(EditorTime.Format(topic.FirstSeenAtUtc.ToLocalTime(), nowLocal))
+                .Append(')');
         }
         summary.Append("\n\nЗа чернова: /draft <номер>");
         return summary.ToString();
