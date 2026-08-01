@@ -17,17 +17,25 @@ public static class DraftValidator
     private const double MaxFacebookCaptionUppercaseRatio = 0.6;
     private const int MaxFacebookHashtags = 3;
 
+    /// <summary>Shorter than this is not a hook — it is an abbreviation the model wrote mid-sentence.</summary>
+    private const int MinFacebookCaptionHookChars = 20;
+
+    /// <summary>A full stop right after a short lowercase word ("проф.", "ул.", "г.") ends an
+    /// abbreviation, not a sentence.</summary>
+    private const int MinWordCharsBeforeFullStop = 5;
+
     /// <summary>
     /// Repairs cosmetic, safely-fixable overflows before validation: SEO title/description are
     /// truncated at a word boundary instead of failing the whole draft (models routinely
-    /// overshoot these by a few characters — observed live 2026-07-03). Substantive problems
+    /// overshoot these by a few characters — observed live 2026-07-03), and the Facebook caption's
+    /// missing hook break is restored (observed live 2026-07-29..31). Substantive problems
     /// (body, category, language) are never auto-repaired; those stay hard gates in Validate.
     /// </summary>
     public static DraftContent Normalize(DraftContent draft) => draft with
     {
         SeoTitle = TruncateAtWordBoundary(draft.SeoTitle.Trim(), MaxSeoTitleChars),
         SeoDescription = TruncateAtWordBoundary(draft.SeoDescription.Trim(), MaxSeoDescriptionChars),
-        FacebookCaption = draft.FacebookCaption.Trim(),
+        FacebookCaption = BreakCaptionHook(draft.FacebookCaption.Trim()),
         FacebookHashtags = NormalizeHashtags(draft.FacebookHashtags),
         // Cover text is re-capped rather than validated: an over-long headline is trimmed to
         // something the image model can render, and an empty one just means a text-free cover.
@@ -161,6 +169,79 @@ public static class DraftValidator
     {
         var newline = text.IndexOf('\n', StringComparison.Ordinal);
         return newline < 0 ? text.Length : newline;
+    }
+
+    /// <summary>
+    /// Restores the blank line after the caption's hook. The prompt asks for a short first line,
+    /// but the model routinely writes one unbroken paragraph — every one of the 21 validation
+    /// failures observed 2026-07-29..31 was this — which makes the "first line" the whole caption
+    /// and discards an otherwise-valid draft. Breaking at the first sentence end that fits above
+    /// the fold is lossless: no text is dropped, only a line break inserted, matching the
+    /// hook + blank line + body shape the compliant generations already produce.
+    ///
+    /// A caption with no sentence end above the fold is left alone — an unbreakable 200-char
+    /// opening sentence is an editorial problem, not a formatting one, so Validate still rejects
+    /// it rather than cutting mid-sentence.
+    /// </summary>
+    private static string BreakCaptionHook(string caption)
+    {
+        if (FirstLineLength(caption) <= MaxFacebookCaptionFirstLineChars)
+            return caption;
+
+        var limit = Math.Min(MaxFacebookCaptionFirstLineChars, caption.Length);
+
+        for (var i = MinFacebookCaptionHookChars - 1; i < limit; i++)
+        {
+            if (!IsTerminator(caption[i]))
+                continue;
+
+            // "?!" and "..." close the hook after the whole run, not inside it.
+            var runStart = i;
+            var runEnd = i;
+            while (runEnd + 1 < caption.Length && IsTerminator(caption[runEnd + 1]))
+                runEnd++;
+            i = runEnd;
+
+            var cut = runEnd + 1;
+            if (cut > limit)
+                break;
+
+            // A sentence end is followed by a break, and the next sentence does not start
+            // lower-case ("…от 2025 г. и продължава" is an abbreviation, not a boundary).
+            if (cut < caption.Length && !char.IsWhiteSpace(caption[cut]))
+                continue;
+            if (NextNonWhiteSpace(caption, cut) is { } next && char.IsLower(next))
+                continue;
+            if (runStart == runEnd
+                && caption[runStart] == '.'
+                && LetterRunLengthBefore(caption, runStart) < MinWordCharsBeforeFullStop)
+                continue;
+
+            return caption[..cut] + "\n\n" + caption[cut..].TrimStart();
+        }
+
+        return caption;
+    }
+
+    private static bool IsTerminator(char ch) => ch is '.' or '!' or '?' or '…';
+
+    private static char? NextNonWhiteSpace(string text, int from)
+    {
+        for (var i = from; i < text.Length; i++)
+        {
+            if (!char.IsWhiteSpace(text[i]))
+                return text[i];
+        }
+        return null;
+    }
+
+    /// <summary>Length of the run of letters ending just before <paramref name="index"/>.</summary>
+    private static int LetterRunLengthBefore(string text, int index)
+    {
+        var count = 0;
+        for (var i = index - 1; i >= 0 && char.IsLetter(text[i]); i--)
+            count++;
+        return count;
     }
 
     /// <summary>Share of uppercase among the cased letters of <paramref name="text"/>

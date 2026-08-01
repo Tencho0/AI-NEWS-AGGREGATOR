@@ -223,6 +223,61 @@ public class DraftValidatorTests
         Assert.Equal(ValidCaption, normalized.FacebookCaption);
         Assert.Equal(["#Благоевград", "#Пирин", "#Струма"], normalized.FacebookHashtags);
     }
+
+    /// <summary>The dominant live failure (2026-07-29..31: 21 of 21 validation failures): the model
+    /// writes the caption as one unbroken paragraph, so the "first line" is the whole caption and
+    /// the draft is discarded. The hook is recoverable losslessly — break at the sentence end.</summary>
+    [Fact]
+    public void Normalize_breaks_an_unbroken_caption_at_the_last_sentence_end_that_fits()
+    {
+        var caption = "Общината обяви нови мерки за контрол. "
+            + string.Concat(Enumerable.Repeat(
+                "Промените влизат в сила от понеделник и засягат центъра. ", 4));
+
+        var normalized = DraftValidator.Normalize(ValidDraft() with { FacebookCaption = caption });
+
+        Assert.StartsWith("Общината обяви нови мерки за контрол.\n\n", normalized.FacebookCaption);
+        Assert.Empty(Validate(normalized));
+    }
+
+    /// <summary>Taking the *last* fitting sentence end (not the first) keeps Bulgarian
+    /// abbreviations like "проф." out of the hook.</summary>
+    [Fact]
+    public void Normalize_does_not_break_the_caption_hook_at_an_abbreviation()
+    {
+        var caption = "По данни на проф. Иванов ръстът на цените се ускорява. "
+            + string.Concat(Enumerable.Repeat(
+                "Общината подготвя нови мерки за контрол на пазара. ", 4));
+
+        var normalized = DraftValidator.Normalize(ValidDraft() with { FacebookCaption = caption });
+
+        Assert.StartsWith("По данни на проф. Иванов ръстът на цените се ускорява.\n\n", normalized.FacebookCaption);
+        Assert.Empty(Validate(normalized));
+    }
+
+    /// <summary>A caption whose first sentence genuinely does not fit above the fold is a real
+    /// editorial problem, not a formatting one — it stays a hard failure rather than being cut
+    /// mid-sentence.</summary>
+    [Fact]
+    public void Normalize_leaves_a_caption_with_no_sentence_end_above_the_fold_alone()
+    {
+        var caption = new string('а', 200) + ". " + new string('б', 150);
+
+        var normalized = DraftValidator.Normalize(ValidDraft() with { FacebookCaption = caption });
+
+        Assert.Equal(caption, normalized.FacebookCaption);
+        Assert.Contains(Validate(normalized), v => v.Contains("first line"));
+    }
+
+    /// <summary>A caption that already breaks early enough is untouched (Normalize stays an
+    /// identity operation on compliant drafts).</summary>
+    [Fact]
+    public void Normalize_leaves_an_already_compliant_caption_untouched()
+    {
+        var normalized = DraftValidator.Normalize(ValidDraft() with { FacebookCaption = ValidCaption });
+
+        Assert.Equal(ValidCaption, normalized.FacebookCaption);
+    }
 }
 
 public class DraftNormalizerTests
