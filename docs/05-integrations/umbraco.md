@@ -34,6 +34,18 @@ on the VPS) and the site ensures the account exists in the Administrators group,
 the password only when config differs. Rotating the config password also unlocks the
 account — the break-glass recovery path for a lost admin login.
 
+`AdminUserSetup` alone is **not** enough to bootstrap a fresh environment: on an empty database
+Umbraco stops at the install wizard and never reaches the started state where the handler's
+notification fires. Production therefore also sets `Umbraco:CMS:Unattended:InstallUnattended`
+plus `UnattendedUserName`/`UnattendedUserEmail`/`UnattendedUserPassword` — same credentials as
+`PredelNews:Admin:*` — so the first boot installs and creates the admin unattended. Full table in
+Predel-News `docs/technical/deployment.md` §3.
+
+> **Status 2026-08-02:** `AdminUserSetup` was written on `feature/admin-user-seed` and never
+> merged; it is now on `feature/seeded-admin` pending review, together with the unattended-install
+> configuration. Deploying `main` before that merges means the install wizard and no break-glass
+> path.
+
 Request (multipart or JSON + image URL fetched server-side — final shape decided in Phase 5):
 
 ```json
