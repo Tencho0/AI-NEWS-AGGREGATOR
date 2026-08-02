@@ -34,6 +34,13 @@ on the VPS) and the site ensures the account exists in the Administrators group,
 the password only when config differs. Rotating the config password also unlocks the
 account — the break-glass recovery path for a lost admin login.
 
+> ⚠️ **Not on `main` as of 2026-08-02.** `AdminUserSetup` lives on the unmerged Predel-News
+> branch `feature/admin-user-seed` (4 commits ahead, 28 behind `main`; merges clean). Until it
+> is merged, the first backoffice administrator comes from **Umbraco's install wizard** on the
+> first boot against an empty database, and there is **no break-glass path** — recovering a lost
+> admin login means editing `umbracoUser` by hand. Merge the branch before the first production
+> deploy, or accept that gap knowingly.
+
 Request (multipart or JSON + image URL fetched server-side — final shape decided in Phase 5):
 
 ```json
