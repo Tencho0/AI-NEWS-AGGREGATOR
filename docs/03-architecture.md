@@ -86,4 +86,5 @@ AI-NEWS-AGGREGATOR/
 The Umbraco-side `PublishingApiController` lives in the **Predel-News repo**
 (`src/BackofficeExtensions/`), following that repo's existing controller patterns; its contract is
 specified here in [05-integrations/umbraco.md](05-integrations/umbraco.md) and any change to the
-contract requires an ADR in *this* repo.
+contract requires an ADR in *this* repo. That repo is `Tencho0/Predel-News`; see
+[Related repositories](../README.md#related-repositories) for how to find a local clone.

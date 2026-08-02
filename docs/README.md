@@ -4,6 +4,15 @@ This folder is the **single source of truth** for the project. The plan is not a
 it is this tree of living documents plus an append-only decision log (ADRs). Code follows docs,
 not the other way around.
 
+## Companion repository
+
+These docs cover the **newsroom automation** only. The site it publishes to — **Predel-News**
+(`Tencho0/Predel-News`), an Umbraco 17 / .NET 10 news website — is a separate repo with its own
+docs, tests and deploy cycle. Documents here call it "the Predel-News repo" and give paths relative
+to *its* root. See [Related repositories](../README.md#related-repositories) for how to locate it
+(by git remote, not by a fixed folder — checkout paths change) and
+[05-integrations/umbraco.md](05-integrations/umbraco.md) for the contract between the two.
+
 ## Documentation map
 
 | Doc | Contents | Update trigger |
