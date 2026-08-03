@@ -68,7 +68,44 @@ service → tails the newest log 20 lines. Non-zero exit = failed deploy; fix or
    would share that access with every other LocalSystem service on the box.
 
    The trade is two `icacls` commands in step 4 — LocalSystem would not need them.
-3. Set **machine-level environment variables** — production configuration and secrets are
+3. **On the shared VPS, prefer `C:\apps\newsroom\appsettings.Production.json`** over machine
+   environment variables. `Program.cs` uses `Host.CreateApplicationBuilder`, which loads
+   `appsettings.{Environment}.json` automatically and defaults the environment to `Production`
+   when `DOTNET_ENVIRONMENT` is unset — so no variable needs setting at all, and `deploy.ps1`
+   already excludes the file from every release copy.
+
+   That matters because machine variables are inherited from `services.exe`, which caches its
+   environment block: picking up a new one needs a reboot or a Service Control Manager restart.
+   On a host running ~25 production sites that is an outage for all of them. The site side hit
+   the same problem with WAS (Predel-News `docs/technical/deployment.md` §3.1).
+
+   Shape it the same as the config keys below, nested rather than `__`-separated:
+
+   ```json
+   {
+     "ConnectionStrings": { "Newsroom": "Server=.\\SQLEXPRESS;Database=Newsroom;Integrated Security=True;TrustServerCertificate=True;Encrypt=True" },
+     "Ai":       { "Gemini": { "ApiKey": "..." } },
+     "Telegram": { "BotToken": "...", "ReviewChatId": -100..., "AllowedUserIds": [ 123456789 ] },
+     "Umbraco":  { "BaseUrl": "https://predelnews.com/", "ClientSecret": "..." },
+     "Facebook": { "PageId": "...", "AccessToken": "...", "DryRun": true },
+     "Images":   { "Pixabay": { "ApiKey": "..." }, "Pexels": { "ApiKey": "..." },
+                   "Cloudflare": { "AccountId": "...", "ApiToken": "..." } }
+   }
+   ```
+
+   ACL it so only the service account and administrators can read it:
+
+   ```powershell
+   $cfg = "C:\apps\newsroom\appsettings.Production.json"
+   icacls $cfg /inheritance:r /grant "NT SERVICE\PredelNewsroom:R" /grant "Administrators:F" /grant "SYSTEM:F"
+   ```
+
+   `Umbraco:ClientSecret` must equal the site's `PredelNews:Newsroom:ClientSecret` **on the VPS** —
+   not whatever the dev machine's user-secrets hold, which points at a different Umbraco.
+
+   On a dedicated host the machine-variable route below is equivalent and fine.
+
+   Set **machine-level environment variables** — production configuration and secrets are
    machine env vars with `__` separators, **not** `dotnet user-secrets` (user-secrets are a
    dev-only mechanism; docs/06-security.md). From an elevated prompt:
 
