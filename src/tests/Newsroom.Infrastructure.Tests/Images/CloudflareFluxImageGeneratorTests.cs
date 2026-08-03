@@ -414,6 +414,32 @@ public class CloudflareFluxImageGeneratorTests : IDisposable
     }
 
     [Fact]
+    public async Task Disabled_generator_never_calls_the_api_even_with_credentials_present()
+    {
+        var storage = NewStorage();
+        var handler = new CannedResponseHandler(SuccessJson, HttpStatusCode.OK);
+        var generator = new CloudflareFluxImageGenerator(
+            new FakeHttpClientFactory(handler),
+            new CloudflareImagesOptions
+            {
+                Enabled = false,
+                AccountId = "acc-123",
+                ApiToken = "cf-token",
+                Width = 1280,
+                Height = 720,
+                TransientRetryDelaySeconds = 0,
+            },
+            storage,
+            new ImageCompositor(NullLogger<ImageCompositor>.Instance),
+            NullLogger<CloudflareFluxImageGenerator>.Instance);
+
+        Assert.False(generator.IsConfigured);
+        await Assert.ThrowsAsync<CloudflareAiException>(
+            () => generator.GenerateAsync(Draft(), CancellationToken.None));
+        Assert.Equal(0, handler.RequestCount);
+    }
+
+    [Fact]
     public async Task Error_3036_on_a_429_is_the_exhausted_daily_allocation()
     {
         var (generator, _, _) = CreateGenerator(

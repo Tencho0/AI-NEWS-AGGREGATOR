@@ -15,9 +15,11 @@ public enum CloudflareRequestFormat
 
 /// <summary>
 /// Settings for the Cloudflare Workers AI cover-image generator (ADR-0011, ADR-0012, ADR-0013),
-/// bound from configuration: <c>Images:Cloudflare:AccountId</c> / <c>Images:Cloudflare:ApiToken</c>
-/// (either empty = generation disabled, stock providers only; real values live in
-/// user-secrets / service environment variables, see docs/06-security.md),
+/// bound from configuration: <c>Images:Cloudflare:Enabled</c> (defaults <c>false</c> — the
+/// 2026-08-03 rollback to stock-only covers, see decision-log.md) plus
+/// <c>Images:Cloudflare:AccountId</c> / <c>Images:Cloudflare:ApiToken</c> (either empty =
+/// generation disabled regardless of <c>Enabled</c>; real values live in user-secrets / service
+/// environment variables, see docs/06-security.md),
 /// <c>Images:Cloudflare:Model</c> + <c>RequestFormat</c>, <c>Steps</c> (FLUX.2 klein fixes steps at
 /// 4 — leave it 0 there so the field is not sent at all), <c>Guidance</c> (0 = not sent), and
 /// <c>Width</c>/<c>Height</c> (default 1280×720 — 16:9, above the site's 1200 px cover warning and
@@ -33,6 +35,14 @@ public enum CloudflareRequestFormat
 public sealed record CloudflareImagesOptions
 {
     public const string DefaultModel = "@cf/black-forest-labs/flux-2-klein-4b";
+
+    /// <summary>Kill switch, independent of whether credentials are configured (2026-08-03
+    /// rollback to stock-only covers — see decision-log.md). Defaults to <c>true</c> on the
+    /// record itself so code that builds these options directly (tests, the generator's own
+    /// callers) is unaffected; <see cref="From"/> binds the configured default as <c>false</c>,
+    /// so a deployment needs an explicit <c>Images:Cloudflare:Enabled=true</c> to turn AI
+    /// generation back on even if AccountId/ApiToken are already set.</summary>
+    public bool Enabled { get; init; } = true;
 
     public string AccountId { get; init; } = "";
     public string ApiToken { get; init; } = "";
@@ -90,6 +100,7 @@ public sealed record CloudflareImagesOptions
 
     public static CloudflareImagesOptions From(IConfiguration configuration) => new()
     {
+        Enabled = configuration.GetValue("Images:Cloudflare:Enabled", false),
         AccountId = configuration.GetValue("Images:Cloudflare:AccountId", "")!,
         ApiToken = configuration.GetValue("Images:Cloudflare:ApiToken", "")!,
         Model = configuration.GetValue("Images:Cloudflare:Model", DefaultModel)!,

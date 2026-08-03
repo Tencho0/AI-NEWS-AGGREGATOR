@@ -1,13 +1,23 @@
 # Integration — Image Sourcing & Suggestion
 
-**Status:** Draft · **Last updated:** 2026-07-31 · **ADR:** 0009, 0011, 0012, 0013
+**Status:** Draft · **Last updated:** 2026-08-03 · **ADR:** 0009, 0011, 0012, 0013
 
 ## Hard rule
 
 **Never reuse images from scraped articles.** Press photos are licensed to their publishers;
 republishing them is a copyright violation with real financial risk (see risk R-4, 06-security.md).
 
-## Sourcing priority (ADR-0009, ADR-0011)
+## Current state (2026-08-03 rollback)
+
+**AI cover generation is disabled.** `Images:Cloudflare:Enabled` defaults to `false`
+(`CloudflareImagesOptions`), so `FeaturedImageService.IsConfigured` is false regardless of whether
+`AccountId`/`ApiToken` are set, and every draft goes straight to the free stock APIs (Pexels,
+Pixabay — tier 2). This is a config-level rollback, not a code removal: all of ADR-0011/0012/0013's
+generation, cover-text, public-figure and logo-compositing code stays in place, tested, and one
+config flag away from being turned back on (`Images:Cloudflare:Enabled=true` alongside a valid
+`AccountId`/`ApiToken`). See decision-log.md for the entry.
+
+## Sourcing priority (ADR-0009, ADR-0011) — behaviour when AI generation is enabled
 
 Implemented automated flow: for every automated draft, `FeaturedImageService` **generates an AI
 illustration first** (ADR-0009's tier 3, implemented via Cloudflare Workers AI FLUX.1 Schnell —
@@ -43,10 +53,11 @@ to 3 stock candidates as before. The editor can always reject, regenerate, or at
   saved on the worker's disk (`Images:Cloudflare:GeneratedImageDir`), row stored with
   `SourceKind='ai'`; metered under budget stage "Image"
   (`Ai:Stages:Image:DailyRequestBudget`, cost 0 inside the free allocation). Config:
-  `Images:Cloudflare:{AccountId, ApiToken, Model, RequestFormat, Steps, Guidance, Width, Height,
-  GeneratedImageDir, ReferenceImageDir, AllowPublicFiguresInSensitiveCategories}` — secrets per
-  06-security.md, never in git. `RequestFormat=Json` + the FLUX.1 Schnell model id is the rollback
-  to pre-ADR-0012 behaviour.
+  `Images:Cloudflare:{Enabled, AccountId, ApiToken, Model, RequestFormat, Steps, Guidance, Width,
+  Height, GeneratedImageDir, ReferenceImageDir, AllowPublicFiguresInSensitiveCategories}` — secrets
+  per 06-security.md, never in git. `Enabled` defaults to `false` (2026-08-03 rollback, see
+  "Current state" above) — set it `true` to turn AI generation back on. `RequestFormat=Json` + the
+  FLUX.1 Schnell model id is the rollback to pre-ADR-0012 behaviour.
 
 ## Cover style (ADR-0012)
 

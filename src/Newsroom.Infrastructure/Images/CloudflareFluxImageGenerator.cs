@@ -79,12 +79,14 @@ public sealed class CloudflareFluxImageGenerator(
     public string Name => $"Cloudflare {ShortModelName(options.Model)}";
 
     public bool IsConfigured =>
-        !string.IsNullOrWhiteSpace(options.AccountId) && !string.IsNullOrWhiteSpace(options.ApiToken);
+        options.Enabled
+        && !string.IsNullOrWhiteSpace(options.AccountId)
+        && !string.IsNullOrWhiteSpace(options.ApiToken);
 
     public async Task<AiImageResult> GenerateAsync(DraftContent content, CancellationToken ct)
     {
         if (!IsConfigured)
-            throw new CloudflareAiException("Cloudflare Workers AI is not configured (Images:Cloudflare:AccountId / ApiToken).");
+            throw new CloudflareAiException("Cloudflare Workers AI is not configured (Images:Cloudflare:Enabled / AccountId / ApiToken).");
 
         var reference = ResolvePersonReference(content);
         // Dropping the plan is exactly how ADR-0013 specifies a text-free cover — the composer
