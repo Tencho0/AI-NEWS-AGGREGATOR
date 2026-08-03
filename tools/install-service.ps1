@@ -7,14 +7,23 @@
     Copy the publish output to -BinPath first (tools\deploy.ps1 does that on releases).
     Run elevated. See docs/runbooks/deploy.md for the full first-install checklist.
 .EXAMPLE
+    # Default: runs as LocalSystem - the most privileged account on the machine.
     .\install-service.ps1
-    .\install-service.ps1 -BinPath C:\apps\newsroom -ServiceAccount ".\svc-newsroom"
+.EXAMPLE
+    # Preferred on a shared host: a per-service virtual account. Windows creates and manages it,
+    # there is no password, and it is the direct equivalent of an IIS AppPoolIdentity.
+    # Grant it db_owner on Newsroom: CREATE LOGIN [NT SERVICE\PredelNewsroom] FROM WINDOWS;
+    .\install-service.ps1 -ServiceAccount "NT SERVICE\PredelNewsroom"
+.EXAMPLE
+    # A real local account needs its password passed through - sc.exe never prompts.
+    .\install-service.ps1 -ServiceAccount ".\svc-newsroom" -ServiceAccountPassword (Read-Host -AsSecureString)
 #>
 [CmdletBinding()]
 param(
     [string]$BinPath = "C:\apps\newsroom",
     [string]$ServiceName = "PredelNewsroom",
-    [string]$ServiceAccount
+    [string]$ServiceAccount,
+    [securestring]$ServiceAccountPassword
 )
 
 $ErrorActionPreference = "Stop"
@@ -32,11 +41,33 @@ try {
 
     Write-Host "Creating service '$ServiceName' -> $exePath"
     $scArgs = @("create", $ServiceName, "binPath=", $exePath, "start=", "auto")
+    $passwordBstr = [IntPtr]::Zero
     if ($ServiceAccount) {
         $scArgs += @("obj=", $ServiceAccount)
-        Write-Host "Service account: $ServiceAccount (sc.exe will prompt for the password)"
+
+        # Built-in and virtual accounts (LocalSystem, NT AUTHORITY\*, NT SERVICE\*) have no
+        # password. Everything else does - and sc.exe does NOT prompt for it, so omitting it
+        # creates a service with a blank password that fails at first start with 1069.
+        $needsPassword = $ServiceAccount -notmatch '^(LocalSystem|NT SERVICE\\|NT AUTHORITY\\)'
+        if ($needsPassword) {
+            if (-not $ServiceAccountPassword) {
+                throw "Account '$ServiceAccount' needs a password. Pass -ServiceAccountPassword (Read-Host -AsSecureString), or use a virtual account such as 'NT SERVICE\$ServiceName' which has none."
+            }
+            $passwordBstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($ServiceAccountPassword)
+            # NOTE: sc.exe takes the password as an argument, so it is briefly visible in this
+            # process's command line. A virtual account avoids the exposure entirely.
+            $scArgs += @("password=", [Runtime.InteropServices.Marshal]::PtrToStringUni($passwordBstr))
+        }
+        Write-Host "Service account: $ServiceAccount$(if (-not $needsPassword) { ' (no password required)' })"
     }
-    & sc.exe @scArgs | Out-Host
+    try {
+        & sc.exe @scArgs | Out-Host
+    }
+    finally {
+        if ($passwordBstr -ne [IntPtr]::Zero) {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($passwordBstr)
+        }
+    }
     if ($LASTEXITCODE -ne 0) { throw "sc.exe create failed with exit code $LASTEXITCODE." }
 
     Write-Host "Setting recovery options (restart after 1 min / 5 min / 15 min, reset daily)"
