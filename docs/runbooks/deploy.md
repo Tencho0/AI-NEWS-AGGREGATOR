@@ -1,6 +1,12 @@
 # Runbook — Deploy a Release
 
-**Status:** Agreed · **Last updated:** 2026-07-03
+**Status:** Agreed · **Last updated:** 2026-08-04
+
+> **For the live deployment**, start with
+> [release-a-new-version.md](release-a-new-version.md): it records the deployed paths, accounts and
+> databases as measured on the host, the exact commands for shipping a newer build of either
+> application, and the host-specific traps (PowerShell 4.0, path length, Cloudflare TLS, disk).
+> This document is the general procedure behind it.
 
 Release procedure from [09-deployment.md](../09-deployment.md). The worker runs as the Windows
 Service `PredelNewsroom` on the Predel-News VPS from `C:\apps\newsroom`. Migrations are applied
