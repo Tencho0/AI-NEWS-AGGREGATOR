@@ -36,12 +36,9 @@ isolation is `SandboxOptions` and `SandboxTelegramGateway`; see
    ```powershell
    sqlcmd -S . -Q "IF DB_ID('Newsroom_Sandbox') IS NULL CREATE DATABASE Newsroom_Sandbox;"
    ```
-   Migrations run inside the worker at startup, so nothing else is needed here.
-3. **Seed the sources:**
-   ```powershell
-   sqlcmd -S . -d Newsroom_Sandbox -i tools\seed-sources.sql
-   ```
-4. **Create the image folder:**
+   The database starts empty — it has no tables yet. Migrations are applied by the worker at
+   startup, which is why seeding comes *after* the first run below, not here.
+3. **Create the image folder:**
    ```powershell
    New-Item -ItemType Directory -Force C:\apps\newsroom-sandbox\images
    ```
@@ -66,6 +63,22 @@ isolation is `SandboxOptions` and `SandboxTelegramGateway`; see
    ```powershell
    dotnet user-secrets set "PredelNews:Newsroom:ClientSecret" "<the same secret>"
    ```
+7. **First run — this is what creates the schema:**
+   ```powershell
+   .\tools\restart-sandbox.ps1
+   ```
+   The worker applies its migrations at startup. Confirm the `🧪 SANDBOX MODE` banner in the tailed
+   log, then check the tables exist:
+   ```powershell
+   sqlcmd -S . -d Newsroom_Sandbox -Q "SELECT COUNT(*) FROM dbo.nw_SchemaVersion;"
+   ```
+8. **Seed the sources** — only now, once the tables exist. Seeding before the first run fails with
+   `Invalid object name 'dbo.nw_Source'`:
+   ```powershell
+   sqlcmd -S . -d Newsroom_Sandbox -i tools\seed-sources.sql
+   ```
+   The running worker picks them up on its next scrape cycle (`Scrape:CheckSeconds`, 300 s in the
+   sandbox); no restart needed.
 
 ## Daily loop
 
