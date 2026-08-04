@@ -113,8 +113,13 @@ busy).
 
 ## 4. Stop it
 
+Filtered by path, not by name alone — an unfiltered `Stop-Process` would also kill a running
+sandbox (same executable name, different folder):
+
 ```powershell
-Get-Process Newsroom.Worker -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process Newsroom.Worker -ErrorAction SilentlyContinue |
+    Where-Object { $_.Path -and $_.Path.StartsWith("C:\apps\newsroom\", [StringComparison]::OrdinalIgnoreCase) } |
+    Stop-Process -Force
 ```
 
 (Or, if you used Option A, just Ctrl+C in its window.)
