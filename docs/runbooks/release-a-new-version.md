@@ -55,6 +55,40 @@ IIS or reboot the machine.
 | Logs | `C:\apps\newsroom\logs\newsroom-<date>.log` |
 | Images | `C:\ProgramData\PredelNewsroom\images` — `generated-images`, `editor-uploads`, `public-figures`, `branding`. **Outside** the install folder (ADR-0013) |
 
+### Where the release scripts live on the host
+
+The scripts are **not** deployed with either application — they are copied to the host separately
+and kept there. Canonical locations:
+
+| Folder | Contents | From |
+|---|---|---|
+| `C:\deploy\site-tools\` | `deploy.ps1`, `rollback.ps1`, `preflight.ps1`, `sql-check.ps1`, `README.txt` | Predel-News `tools/` |
+| `C:\deploy\worker-tools\` | `deploy.ps1`, `rollback.ps1`, `install-service.ps1`, `seed-sources.sql`, `check-dotnet-runtime.ps1`, `list-dotnet-versions.ps1`, `README.txt` | AI-NEWS-AGGREGATOR `tools/` |
+| `C:\deploy\` | staging: the publish zip and the folder it is extracted to | transient, delete after a release |
+
+**Both folders contain a `deploy.ps1` and a `rollback.ps1` with identical names and different
+jobs** — one drives an IIS app pool, the other a Windows service. Keep them in separate folders and
+never flatten them together. Each refuses to run unless it finds its own binary in the publish
+source (`PredelNews.Web.dll` / `Newsroom.Worker.exe`), so a mix-up fails with a clear error rather
+than deploying the wrong application — but the folder separation is what stops the confusion in the
+first place. Each folder carries a `README.txt` naming which application it belongs to, so an
+unzipped copy is self-describing.
+
+Identify a loose script with:
+
+```powershell
+Select-String -Path .\deploy.ps1 -Pattern "Newsroom.Worker.exe|PredelNews.Web.dll" |
+  Select-Object -First 1 -ExpandProperty Line
+```
+
+`restart-worker.ps1` from the worker repo is **deliberately not on the host**: it forces
+`DOTNET_ENVIRONMENT=Development`, which loads `dotnet user-secrets` instead of
+`appsettings.Production.json` — on this host that starts the worker with no configuration at all.
+
+Refresh the scripts from the repos whenever they change; they are versioned there, and the copies
+on the host are just copies. The defaults baked into them match this host, so a normal release needs
+only `-PublishSource`.
+
 ### Configuration is by file, not environment variable
 
 Both applications read `appsettings.Production.json` from their own folder. **No machine
