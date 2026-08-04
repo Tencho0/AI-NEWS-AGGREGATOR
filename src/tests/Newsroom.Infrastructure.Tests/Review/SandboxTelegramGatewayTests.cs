@@ -12,6 +12,7 @@ public class SandboxTelegramGatewayTests
         public string? Html { get; private set; }
         public string? Caption { get; private set; }
         public long ChatId { get; private set; }
+        public long MessageId { get; private set; }
         public bool WithReviewButtons { get; private set; }
         public long? DraftId { get; private set; }
         public string? ScheduleLabel { get; private set; }
@@ -21,6 +22,9 @@ public class SandboxTelegramGatewayTests
         public string? CallbackText { get; private set; }
         public string? FileId { get; private set; }
         public string? Directory { get; private set; }
+        public string? PhotoReference { get; private set; }
+        public int? Index { get; private set; }
+        public int? Total { get; private set; }
 
         public Task<TgUpdateBatch> GetUpdatesAsync(long offset, int timeoutSeconds, CancellationToken ct)
         {
@@ -40,7 +44,7 @@ public class SandboxTelegramGatewayTests
         public Task EditHtmlAsync(long chatId, long messageId, string html, bool removeButtons,
             long? approveNowDraftIdForButton, CancellationToken ct)
         {
-            (ChatId, Html, RemoveButtons, DraftId) = (chatId, html, removeButtons, approveNowDraftIdForButton);
+            (ChatId, MessageId, Html, RemoveButtons, DraftId) = (chatId, messageId, html, removeButtons, approveNowDraftIdForButton);
             return Task.CompletedTask;
         }
 
@@ -53,21 +57,21 @@ public class SandboxTelegramGatewayTests
         public Task<long> SendPhotoAsync(long chatId, string photoUrlOrFileId, string? caption,
             long? draftIdForCycleButton, int? index, int? total, CancellationToken ct)
         {
-            (ChatId, Caption, DraftId) = (chatId, caption, draftIdForCycleButton);
+            (ChatId, PhotoReference, Caption, DraftId, Index, Total) = (chatId, photoUrlOrFileId, caption, draftIdForCycleButton, index, total);
             return Task.FromResult(8L);
         }
 
         public Task EditPhotoAsync(long chatId, long messageId, string photoUrlOrFileId,
             string? caption, long? draftIdForCycleButton, CancellationToken ct)
         {
-            (ChatId, Caption, DraftId) = (chatId, caption, draftIdForCycleButton);
+            (ChatId, MessageId, PhotoReference, Caption, DraftId) = (chatId, messageId, photoUrlOrFileId, caption, draftIdForCycleButton);
             return Task.CompletedTask;
         }
 
         public Task<long> SendPhotoFileAsync(long chatId, string localPath, string? caption,
             long? draftIdForCycleButton, int? index, int? total, CancellationToken ct)
         {
-            (ChatId, Caption, DraftId) = (chatId, caption, draftIdForCycleButton);
+            (ChatId, PhotoReference, Caption, DraftId, Index, Total) = (chatId, localPath, caption, draftIdForCycleButton, index, total);
             return Task.FromResult(9L);
         }
 
@@ -110,6 +114,8 @@ public class SandboxTelegramGatewayTests
         await gateway.EditHtmlAsync(42, 7, "✅ Одобрено", removeButtons: true,
             approveNowDraftIdForButton: null, CancellationToken.None);
 
+        Assert.Equal(42, inner.ChatId);
+        Assert.Equal(7, inner.MessageId);
         Assert.StartsWith(SandboxTelegramGateway.HtmlMarker, inner.Html);
         Assert.Contains("✅ Одобрено", inner.Html);
         Assert.True(inner.RemoveButtons);
@@ -131,14 +137,28 @@ public class SandboxTelegramGatewayTests
     {
         var (gateway, inner) = Subject();
 
-        await gateway.SendPhotoAsync(42, "https://img/1.jpg", "снимка", 5, null, 3, CancellationToken.None);
+        await gateway.SendPhotoAsync(42, "https://img/1.jpg", "снимка", 5, 2, 3, CancellationToken.None);
+        Assert.Equal(42, inner.ChatId);
+        Assert.Equal("https://img/1.jpg", inner.PhotoReference);
         Assert.StartsWith(SandboxTelegramGateway.CaptionMarker, inner.Caption);
+        Assert.Contains("снимка", inner.Caption);
+        Assert.Equal(2, inner.Index);
+        Assert.Equal(3, inner.Total);
 
         await gateway.EditPhotoAsync(42, 8, "https://img/2.jpg", "друга", 5, CancellationToken.None);
+        Assert.Equal(42, inner.ChatId);
+        Assert.Equal(8, inner.MessageId);
+        Assert.Equal("https://img/2.jpg", inner.PhotoReference);
         Assert.StartsWith(SandboxTelegramGateway.CaptionMarker, inner.Caption);
+        Assert.Contains("друга", inner.Caption);
 
-        await gateway.SendPhotoFileAsync(42, @"C:\img\cover.png", "корица", 5, null, 1, CancellationToken.None);
+        await gateway.SendPhotoFileAsync(42, @"C:\img\cover.png", "корица", 5, 1, 4, CancellationToken.None);
+        Assert.Equal(42, inner.ChatId);
+        Assert.Equal(@"C:\img\cover.png", inner.PhotoReference);
         Assert.StartsWith(SandboxTelegramGateway.CaptionMarker, inner.Caption);
+        Assert.Contains("корица", inner.Caption);
+        Assert.Equal(1, inner.Index);
+        Assert.Equal(4, inner.Total);
     }
 
     [Fact]
@@ -149,6 +169,17 @@ public class SandboxTelegramGatewayTests
         await gateway.SendPhotoAsync(42, "https://img/1.jpg", null, null, null, 1, CancellationToken.None);
 
         Assert.Null(inner.Caption);
+    }
+
+    [Fact]
+    public async Task An_already_marked_caption_is_not_marked_twice()
+    {
+        var (gateway, inner) = Subject();
+        var once = $"{SandboxTelegramGateway.CaptionMarker}\n\nвече маркирана";
+
+        await gateway.SendPhotoAsync(42, "https://img/1.jpg", once, null, null, 1, CancellationToken.None);
+
+        Assert.Equal(once, inner.Caption);
     }
 
     [Fact]
