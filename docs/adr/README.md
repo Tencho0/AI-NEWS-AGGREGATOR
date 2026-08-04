@@ -34,3 +34,4 @@ Small decisions that don't warrant an ADR get a one-liner directly in the decisi
 | [0011](0011-cloudflare-flux-image-generation.md) | Cloudflare Workers AI (FLUX.1 Schnell) for cover-image generation | Accepted (style/model superseded by 0012) |
 | [0012](0012-photoreal-covers-and-public-figures.md) | Photoreal cinematic covers on FLUX.2 klein 4B; public figures only from approved reference photos | Accepted |
 | [0013](0013-burnt-in-cover-text-and-persistent-image-storage.md) | Burnt-in cover headline/key numbers, local logo compositing, persistent image storage with retention, code-based quota classification | Accepted |
+| [0014](0014-sandbox-mode.md) | Sandbox mode: a second worker instance isolated by environment, secrets, and a fail-closed guard | Accepted |

@@ -3,7 +3,12 @@
 --
 -- ⚠ ENCODING — run this file as UTF-8 or the Cyrillic names land as mojibake:
 --
---     sqlcmd -S .\SQLEXPRESS -d Newsroom -E -f 65001 -i tools\seed-sources.sql
+--     sqlcmd -S <instance> -d Newsroom -E -f 65001 -i tools\seed-sources.sql
+--
+-- <instance> depends on the host: this dev machine has only the default instance (`.`, i.e.
+-- MSSQLSERVER) — see docs/runbooks/run-the-sandbox.md, which seeds Newsroom_Sandbox the same way.
+-- The VPS's SQL Server is the named instance `.\SQLEXPRESS` — see
+-- docs/runbooks/release-a-new-version.md. Do not hard-code either — check which host you're on.
 --
 -- Without -f 65001, sqlcmd decodes the file with the client ANSI codepage (1252
 -- on this box), so N'БТА' is already 'Ð‘Ð¢Ð' before SQL Server sees it and

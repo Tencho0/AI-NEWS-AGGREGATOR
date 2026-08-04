@@ -13,11 +13,38 @@ deployment, roadmap, risk register, and the ADR decision log.
 This project is documentation-first: every important decision is recorded as an ADR in
 [docs/adr/](docs/adr/) before (or with) the code that implements it.
 
+## Running it locally — use the sandbox
+
+**The live pipeline runs on the Predel-News VPS.** On a dev machine you run the **sandbox**: the
+same worker in a `Sandbox` environment with its own database, its own Telegram bot, its own
+secrets store, publishing to a local Umbraco — and structurally unable to reach the real Facebook
+Page ([ADR-0014](docs/adr/0014-sandbox-mode.md)).
+
+```powershell
+.\tools\restart-sandbox.ps1
+```
+
+Full setup — the sandbox bot, the `Newsroom_Sandbox` database, the secrets, and the client secret
+you mirror into the Predel-News repo so the two sides authenticate — is in
+📗 **[docs/runbooks/run-the-sandbox.md](docs/runbooks/run-the-sandbox.md)**.
+
+The sandbox refuses to start unless every destination is a sandbox one: the database name must end
+`_Sandbox`, the site URL must be loopback, and the image root must contain `sandbox`. It reports
+all violations at once and exits before any job runs, so a copied connection string fails loudly
+instead of quietly publishing to production. Every message it sends is prefixed `🧪 SANDBOX`.
+
+> Starting a `Development`-environment worker here instead is **not** the dev path — that loads
+> this machine's live secrets and will contend with the VPS for the Telegram bot token. See the
+> warning at the top of [docs/runbooks/start-the-worker.md](docs/runbooks/start-the-worker.md).
+
 ## Status
 
-Planning phase (Phase 0). Current milestone: confirm proposed ADRs 0002–0009 and the open
-questions in [docs/11-risks-and-open-questions.md](docs/11-risks-and-open-questions.md),
-then scaffold the solution per [docs/10-roadmap.md](docs/10-roadmap.md).
+Live. The worker runs as the Windows Service `PredelNewsroom` on the VPS, drafting and publishing
+to the Facebook Page; the Umbraco website leg is gated behind `Publishing:FacebookOnly` while the
+site is finished. Releases follow
+[docs/runbooks/release-a-new-version.md](docs/runbooks/release-a-new-version.md); remaining work is
+tracked in [docs/10-roadmap.md](docs/10-roadmap.md) and
+[docs/11-risks-and-open-questions.md](docs/11-risks-and-open-questions.md).
 
 ## Related repositories
 

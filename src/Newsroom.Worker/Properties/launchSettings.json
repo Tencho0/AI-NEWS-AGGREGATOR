@@ -1,6 +1,13 @@
 ﻿{
   "$schema": "https://json.schemastore.org/launchsettings.json",
   "profiles": {
+    "Sandbox": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "Sandbox"
+      }
+    },
     "Newsroom.Worker": {
       "commandName": "Project",
       "dotnetRunMessages": true,

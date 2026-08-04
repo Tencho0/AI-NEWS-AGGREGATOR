@@ -1,6 +1,6 @@
 # 06 — Security & Legal
 
-**Status:** Draft · **Last updated:** 2026-07-02
+**Status:** Draft · **Last updated:** 2026-08-04
 
 ## Secrets
 
@@ -21,6 +21,21 @@ log output (Serilog destructuring policy); rotation runbook in 07-operations.md.
 environment. E.g. `dotnet user-secrets set "Ai:Gemini:ApiKey" "<key>" --project src/Newsroom.Worker`.
 The Gemini key was provisioned this way on 2026-07-02; it also transited a chat session, so
 rotate it in AI Studio at the next convenient moment.
+
+**Two secrets stores on this dev machine, never merged (ADR-0014):** the `Development` environment
+loads this machine's default `dotnet user-secrets` store automatically — that store holds the
+*live* Telegram bot token, the live Gemini key and the live Facebook Page token. The `Sandbox`
+environment never loads that store; `Program.cs` instead loads a second, separate one explicitly,
+`--id newsroom-worker-sandbox`, and only when `DOTNET_ENVIRONMENT=Sandbox`. The sandbox store must
+**never** hold `Facebook:PageId` or `Facebook:AccessToken` — no code path reads them for the
+sandbox (`Facebook:DryRun` is forced true and `Publishing:FacebookOnly` forced false in code
+regardless of what either store says), but keeping the sandbox store free of live Facebook
+credentials in the first place is the second line of defence, not the first (see
+[runbooks/run-the-sandbox.md](runbooks/run-the-sandbox.md)). User-secrets live under
+`%APPDATA%\Microsoft\UserSecrets\<id>\secrets.json`, which is **per Windows user profile** — a
+service account such as production's `NT SERVICE\PredelNewsroom` would not see either store, which
+is exactly why production reads `appsettings.Production.json` / machine environment variables
+instead (09-deployment.md).
 
 ## Authentication & authorization boundaries
 

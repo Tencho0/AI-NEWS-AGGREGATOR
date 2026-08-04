@@ -1,10 +1,31 @@
 # Runbook — Start the Worker (dev machine)
 
-**Status:** Agreed · **Last updated:** 2026-07-09
+**Status:** Agreed · **Last updated:** 2026-08-04
 
-How to start / stop / check the Newsroom worker **on this dev machine, by yourself** — no Claude
-session needed. (For the VPS/production install see [deploy.md](deploy.md) and
+> **This is not the live pipeline.** The live pipeline is the Windows Service `PredelNewsroom` on
+> the Predel-News VPS — see [release-a-new-version.md](release-a-new-version.md) and
+> [deploy.md](deploy.md). What this document starts is a second, `Development`-environment worker
+> **on this dev machine**, which loads this machine's own `dotnet user-secrets` store — and that
+> store still holds the *real* Telegram bot token, Gemini key and Facebook Page token (set before
+> the VPS existed, never withdrawn). Running it is not harmless: on 2026-08-04, doing exactly this
+> collided with the VPS's own poller (`409 Conflict: terminated by other getUpdates request`) and
+> sent one duplicate live daily-digest message before it was caught and killed (see
+> [ADR-0014](../adr/0014-sandbox-mode.md) and [decision-log.md](../decision-log.md)). **For
+> day-to-day development, use [run-the-sandbox.md](run-the-sandbox.md) instead** — it is
+> fail-closed against the live database, site and Facebook page. Only follow the rest of this
+> document when you deliberately need this machine's live secrets running locally, and confirm
+> nothing else is polling the same bot token first.
+
+How to start / stop / check this worker **on this dev machine, by yourself** — no Claude session
+needed. (For the VPS/production install see
+[release-a-new-version.md](release-a-new-version.md) and [deploy.md](deploy.md); for a reboot see
 [restore-after-vps-restart.md](restore-after-vps-restart.md).)
+
+> **Where it runs from:** on this dev machine, this `Development`-environment worker runs from its
+> own `C:\apps\newsroom` — a local folder, distinct from the identically-named `C:\apps\newsroom` on
+> the VPS — not from `src\Newsroom.Worker\bin\Debug\net10.0`, which is development/F5 and the
+> sandbox profile only (see [ADR-0014](../adr/0014-sandbox-mode.md)). Keeping them apart means a
+> `dotnet build` no longer has to stop this worker first.
 
 > **Why it keeps stopping:** if the worker is started from inside a Claude Code chat, it dies when
 > that chat/session closes. Start it with **Option B (detached)** below and it survives closing the
@@ -18,10 +39,13 @@ session needed. (For the VPS/production install see [deploy.md](deploy.md) and
   Start-Service MSSQLSERVER          # only if it is stopped
   ```
 - **Secrets are already set** in `dotnet user-secrets` for `Newsroom.Worker` (Gemini, Telegram,
-  Facebook). You do **not** need to re-enter them. `DOTNET_ENVIRONMENT=Development` is what makes
-  the app load them — every start command below sets it.
-- **Only one instance at a time.** Two running copies both long-poll Telegram and fight over it.
-  Always stop a running instance (section 4) before starting a new one.
+  Facebook) — the real ones, per the warning above. You do **not** need to re-enter them.
+  `DOTNET_ENVIRONMENT=Development` is what makes the app load them — every start command below
+  sets it.
+- **Only one instance at a time — and that is not just about this machine.** Two running copies
+  both long-poll Telegram and fight over it, and the VPS's live instance already polls with this
+  same bot token, so starting this worker also contends with it. Always stop a running instance
+  here (section 4) before starting a new one, and don't leave it running unattended.
 - Open **PowerShell in the repo root**:
   ```powershell
   cd "C:\Users\TenchoBostandzhiev\source\GitHub -Tencho Bostandzhiev\AI-NEWS-AGGREGATOR"
@@ -31,22 +55,28 @@ session needed. (For the VPS/production install see [deploy.md](deploy.md) and
 
 Runs in the window; you see the live log; **closing the window or Ctrl+C stops it.**
 
+> `dotnet run` applies a launch profile, and a launch profile's `environmentVariables` win over
+> whatever `DOTNET_ENVIRONMENT` you export in the shell first. With no `--launch-profile` named,
+> `dotnet run` applies whichever profile is *first* in `launchSettings.json` — currently `Sandbox`,
+> not `Newsroom.Worker` (see [ADR-0014](../adr/0014-sandbox-mode.md)). `--launch-profile` below
+> pins it explicitly, so this command loads `Development` regardless of profile order.
+
 ```powershell
 $env:DOTNET_ENVIRONMENT = 'Development'
-dotnet run --project src\Newsroom.Worker -c Debug
+dotnet run --project src\Newsroom.Worker -c Debug --launch-profile Newsroom.Worker
 ```
 
 ## Option B — Detached start (keeps running after you close the terminal) ← use this
 
-Build once, then launch the built .exe as its own process. `-WindowStyle Hidden` means **no
-window at all**, so there is nothing to accidentally close — you can shut every terminal and it
-keeps running:
+Publish once to this worker's own folder, `C:\apps\newsroom` on this dev machine (**not**
+`bin\Debug` — that's development/sandbox-only now, see the note above), then launch the published
+.exe as its own process. `-WindowStyle Hidden` means **no window at all**, so there is nothing to accidentally
+close — you can shut every terminal and it keeps running:
 
 ```powershell
-dotnet build src\Newsroom.Worker\Newsroom.Worker.csproj -c Debug   # rebuild after any code change
+dotnet publish src\Newsroom.Worker\Newsroom.Worker.csproj -c Debug -o C:\apps\newsroom   # after any code change
 $env:DOTNET_ENVIRONMENT = 'Development'
-$dir = Resolve-Path "src\Newsroom.Worker\bin\Debug\net10.0"
-Start-Process -FilePath "$dir\Newsroom.Worker.exe" -WorkingDirectory $dir -WindowStyle Hidden
+Start-Process -FilePath "C:\apps\newsroom\Newsroom.Worker.exe" -WorkingDirectory "C:\apps\newsroom" -WindowStyle Hidden
 ```
 
 **One-liner for the whole restart** — `tools\restart-worker.ps1` does exactly the above, after
@@ -59,7 +89,7 @@ stopping any running instance (section 4) and checking the new one stayed up:
 If the running instance was started from an *elevated* prompt, a normal session cannot kill it; the
 script asks for elevation (UAC) for the stop step only, so the worker comes back up unelevated.
 
-It now runs independently. Logs go to `src\Newsroom.Worker\bin\Debug\net10.0\logs\newsroom-<date>.log`
+It now runs independently. Logs go to `C:\apps\newsroom\logs\newsroom-<date>.log`
 (there is no live console, so watch the log file — see section 3).
 
 > **Which window can I close?** If you drop `-WindowStyle Hidden`, the worker opens its **own**
@@ -73,7 +103,7 @@ It now runs independently. Logs go to `src\Newsroom.Worker\bin\Debug\net10.0\log
 ```powershell
 Get-Process Newsroom.Worker -ErrorAction SilentlyContinue   # a row = running; nothing = stopped
 # last few log lines (detached / Option B path):
-Get-Content (Get-ChildItem "src\Newsroom.Worker\bin\Debug\net10.0\logs\newsroom-*.log" |
+Get-Content (Get-ChildItem "C:\apps\newsroom\logs\newsroom-*.log" |
     Sort-Object LastWriteTime | Select-Object -Last 1).FullName -Tail 6
 ```
 
@@ -83,15 +113,39 @@ busy).
 
 ## 4. Stop it
 
+Filtered by path, not by name alone — an unfiltered `Stop-Process` would also kill a running
+sandbox (same executable name, different folder):
+
 ```powershell
-Get-Process Newsroom.Worker -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process Newsroom.Worker -ErrorAction SilentlyContinue |
+    Where-Object { $_.Path -and $_.Path.StartsWith("C:\apps\newsroom\", [StringComparison]::OrdinalIgnoreCase) } |
+    Stop-Process -Force
 ```
 
 (Or, if you used Option A, just Ctrl+C in its window.)
 
+## Rolling back
+
+If `C:\apps\newsroom` is ever unusable and the worker needs to run from the old location, stop it
+(section 4) and start it the pre-2026-08-04 way — nothing else about the app changed, so this
+still works exactly as before:
+
+```powershell
+dotnet build src\Newsroom.Worker\Newsroom.Worker.csproj -c Debug
+$env:DOTNET_ENVIRONMENT = 'Development'
+$dir = Resolve-Path "src\Newsroom.Worker\bin\Debug\net10.0"
+Start-Process -FilePath "$dir\Newsroom.Worker.exe" -WorkingDirectory $dir -WindowStyle Hidden
+```
+
+`tools\restart-worker.ps1` will not manage an instance started this way — it only stops and checks
+processes whose path is under `C:\apps\newsroom` (or whatever `-LiveRoot` you pass it) — so stop
+and verify this one by hand.
+
 ## 5. Publishing mode (what it does when running)
 
-Currently set (in user-secrets) to **Facebook-only, live**:
+This is real, live configuration — the same secrets the VPS instance uses, just held in this
+machine's own user-secrets store instead ([06-security.md](../06-security.md)). Currently set (in
+user-secrets) to **Facebook-only, live**:
 
 - `Publishing:FacebookOnly = true` → skips the website; approved drafts post straight to the FB page.
 - `Facebook:DryRun = false` → posts are **real**.
@@ -111,10 +165,19 @@ dotnet user-secrets set "Publishing:FacebookOnly" "false" --project src\Newsroom
 
 ## Notes
 
-- **After changing code**, rebuild before Option B (the `dotnet build` line). Stop the running
-  instance first — a running worker locks the DLL and the build fails.
+- **After changing code**, republish before Option B (the `dotnet publish` line). Stop the running
+  instance first — a running worker locks its own files under `C:\apps\newsroom` and the publish
+  fails.
 - **Drafting is paused** if you set it so via Telegram `/pause`; `/resume` to re-enable. Scraping and
   Telegram review run regardless.
 - The `dotnet run` (Option A) working dir is `src\Newsroom.Worker`, so its logs and `editor-uploads`
-  live there; the detached .exe (Option B) uses `bin\Debug\net10.0`. Editor photo uploads are read
-  from disk at publish time, so keep starting it the same way (don't mix A and B mid-review).
+  live there; the detached .exe (Option B) now runs from `C:\apps\newsroom` instead. Editor photo
+  uploads are read from disk at publish time, so keep starting it the same way (don't mix A and B
+  mid-review).
+- `src\Newsroom.Worker\bin\Debug\net10.0` is development/F5 and sandbox territory only now (see
+  [ADR-0014](../adr/0014-sandbox-mode.md)); it is no longer where this worker runs from, which is
+  why a plain `dotnet build` no longer needs it stopped first.
+- **This dev machine runs the sandbox day to day** — see
+  [run-the-sandbox.md](run-the-sandbox.md). This document is for the narrower case of needing this
+  machine's live secrets running locally; it is not where the live pipeline belongs, and it is not
+  the default way to develop.

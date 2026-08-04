@@ -27,6 +27,16 @@ try
 {
     var builder = Host.CreateApplicationBuilder(args);
 
+    // Sandbox mode (ADR-0014). Host.CreateApplicationBuilder only auto-loads dotnet user-secrets
+    // in the Development environment, so under Sandbox the LIVE store is never read; the
+    // sandbox's own store is added explicitly and, being appended last, wins over every other
+    // provider already registered — the JSON files, environment variables and the command line
+    // alike — which inverts the framework's usual env-vars/command-line-override-config ordering.
+    if (builder.Environment.IsEnvironment(SandboxOptions.EnvironmentName))
+        builder.Configuration.AddUserSecrets(SandboxOptions.UserSecretsId);
+
+    var sandbox = SandboxOptions.From(builder.Configuration);
+
     builder.Services.AddWindowsService(options => options.ServiceName = "PredelNewsroom");
 
     builder.Services.AddSerilog((services, loggerConfiguration) => loggerConfiguration
@@ -35,6 +45,20 @@ try
 
     var connectionString = builder.Configuration.GetConnectionString("Newsroom")
         ?? throw new InvalidOperationException("ConnectionStrings:Newsroom is not configured.");
+
+    // Fail closed: a sandbox still pointing at a live destination must not reach a job. All
+    // violations are reported at once so the config is fixed in one pass.
+    if (sandbox.Enabled)
+    {
+        var violations = SandboxOptions.Violations(
+            connectionString,
+            builder.Configuration.GetValue("Umbraco:BaseUrl", "")!,
+            ImageStorageOptions.From(builder.Configuration).Root);
+        if (violations.Count > 0)
+            throw new InvalidOperationException(
+                $"Sandbox mode refused to start:{Environment.NewLine}  - "
+                + string.Join($"{Environment.NewLine}  - ", violations));
+    }
 
     var connectionFactory = new SqlConnectionFactory(connectionString);
     builder.Services.AddSingleton(connectionFactory);
@@ -139,8 +163,13 @@ try
     // missing bot token degrades to a dormant review stage instead of failing host startup.
     builder.Services.AddSingleton<IReviewRepository, ReviewRepository>();
     builder.Services.AddSingleton(_ => new Lazy<ITelegramGateway>(() =>
-        new TelegramGateway(TelegramOptions.From(builder.Configuration).BotToken
-            ?? throw new InvalidOperationException("Telegram:BotToken is not configured."))));
+    {
+        ITelegramGateway gateway = new TelegramGateway(
+            TelegramOptions.From(builder.Configuration).BotToken
+                ?? throw new InvalidOperationException("Telegram:BotToken is not configured."));
+        // Wrapping the gateway (not the renderer) also marks watchdog alerts and the daily digest.
+        return sandbox.Enabled ? new SandboxTelegramGateway(gateway) : gateway;
+    }));
 
     // Publishing (docs/02-functional-spec.md §6, ADR-0007/0008): Approved drafts go to the
     // Umbraco site's publishing endpoint, then a link post to the Facebook page via the Graph
@@ -148,8 +177,20 @@ try
     // missing BaseUrl/secret degrades to a dormant publishing stage and a missing Facebook
     // page/token to a site-only one (Facebook:DryRun additionally defaults ON).
     builder.Services.AddSingleton(UmbracoOptions.From(builder.Configuration));
-    builder.Services.AddSingleton(FacebookOptions.From(builder.Configuration));
-    builder.Services.AddSingleton(PublishingOptions.From(builder.Configuration));
+
+    // Sandbox overrides configuration rather than trusting it (ADR-0014): DryRun on means
+    // FacebookPublisher takes its existing dry-run branch and never calls the Graph API, whatever
+    // a stray token in configuration says; FacebookOnly off is required because it would
+    // otherwise skip the Umbraco leg entirely — and publishing to the local site is the point.
+    var facebookOptions = FacebookOptions.From(builder.Configuration);
+    var publishingOptions = PublishingOptions.From(builder.Configuration);
+    if (sandbox.Enabled)
+    {
+        facebookOptions = facebookOptions with { DryRun = true };
+        publishingOptions = publishingOptions with { FacebookOnly = false };
+    }
+    builder.Services.AddSingleton(facebookOptions);
+    builder.Services.AddSingleton(publishingOptions);
     builder.Services.AddSingleton<IPublishRepository, PublishRepository>();
     builder.Services.AddHttpClient<IUmbracoPublisher, UmbracoPublisher>(
             client => client.Timeout = TimeSpan.FromSeconds(30))
@@ -181,6 +222,20 @@ try
     builder.Services.AddHostedService<RetentionJob>();
 
     var host = builder.Build();
+
+    if (sandbox.Enabled)
+    {
+        // Warning level and first in the log: the fastest way to notice a sandbox pointed
+        // somewhere unintended. Every destination is named explicitly.
+        host.Services.GetRequiredService<ILogger<Program>>().LogWarning(
+            "🧪 SANDBOX MODE — database {Database}, Telegram chat {ChatId}, site {Site}, "
+            + "Facebook dry-run (forced), images {ImageRoot}",
+            SandboxOptions.DatabaseName(connectionString) ?? "(unparseable)",
+            TelegramOptions.From(builder.Configuration).ReviewChatId,
+            builder.Configuration.GetValue("Umbraco:BaseUrl", ""),
+            ImageStorageOptions.From(builder.Configuration).Root);
+    }
+
     host.Run();
     return 0;
 }
