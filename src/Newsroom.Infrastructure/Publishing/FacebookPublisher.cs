@@ -136,6 +136,13 @@ public sealed class FacebookPublisher(
 
     public async Task<bool> CheckTokenAsync(CancellationToken ct)
     {
+        // Dry-run means this publisher never calls the Graph API (class doc above, ADR-0014) —
+        // that invariant belongs here, not only in the sole caller (PublishJob.CheckTokenHealthAsync,
+        // which already skips calling this method under DryRun). Report healthy rather than unknown:
+        // a dry-run publisher has no token to be invalid.
+        if (options.DryRun)
+            return true;
+
         try
         {
             using var response = await http.GetAsync(

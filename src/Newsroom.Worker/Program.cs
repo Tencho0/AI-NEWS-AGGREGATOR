@@ -29,8 +29,10 @@ try
 
     // Sandbox mode (ADR-0014). Host.CreateApplicationBuilder only auto-loads dotnet user-secrets
     // in the Development environment, so under Sandbox the LIVE store is never read; the
-    // sandbox's own store is added explicitly and, being appended last, wins over the JSON files.
-    if (builder.Environment.EnvironmentName == SandboxOptions.EnvironmentName)
+    // sandbox's own store is added explicitly and, being appended last, wins over every other
+    // provider already registered — the JSON files, environment variables and the command line
+    // alike — which inverts the framework's usual env-vars/command-line-override-config ordering.
+    if (builder.Environment.IsEnvironment(SandboxOptions.EnvironmentName))
         builder.Configuration.AddUserSecrets(SandboxOptions.UserSecretsId);
 
     var sandbox = SandboxOptions.From(builder.Configuration);
