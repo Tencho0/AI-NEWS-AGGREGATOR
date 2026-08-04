@@ -304,6 +304,17 @@ public class FacebookPublisherTests
         Assert.False(await publisher.CheckTokenAsync(CancellationToken.None));
     }
 
+    [Fact]
+    public async Task The_token_check_reports_healthy_in_dry_run_without_any_http_call()
+    {
+        var (publisher, handler) = CreatePublisher(
+            _ => throw new InvalidOperationException("dry-run must not reach the Graph API"),
+            Options with { DryRun = true });
+
+        Assert.True(await publisher.CheckTokenAsync(CancellationToken.None));
+        Assert.Empty(handler.Requests);
+    }
+
     /// <summary>What one request looked like on the wire — captured at send time, because the
     /// publisher disposes its requests after use.</summary>
     private sealed record RecordedRequest(string Path, string Query, string Body);
