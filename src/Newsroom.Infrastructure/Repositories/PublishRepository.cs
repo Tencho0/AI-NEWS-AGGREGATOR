@@ -395,14 +395,22 @@ public sealed class PublishRepository(IDbConnectionFactory db, ImageStorage stor
 
     /// <summary>Dapper row shape of <see cref="GetPendingFacebookAsync"/> and
     /// <see cref="GetFacebookPostForDraftAsync"/> — the Facebook caption/hashtags are preferred
-    /// over the SeoDescription-based teaser when the draft carries one.</summary>
+    /// over the SeoDescription-based teaser when the draft carries one.
+    ///
+    /// **Parameter order must match the SELECT column order in both queries.** Dapper compares
+    /// constructor parameter names against the returned columns *positionally*, so a record whose
+    /// parameters are merely a permutation of the columns fails to materialise at all — the whole
+    /// query throws "a parameterless default constructor or one matching signature … is required".
+    /// BodyMarkdown sat at position 4 here while both SELECTs return it at 6, so the Facebook leg
+    /// of publishing threw on every cycle (found on the production host 2026-08-04). Same defect
+    /// as ViewSelectSql/ReviewRow in ReviewRepository, fixed 2026-07-30.</summary>
     private sealed record FacebookRow(
         long DraftId,
         string Headline,
         string? SeoDescription,
-        string BodyMarkdown,
         string? FacebookCaption,
         string? FacebookHashtagsJson,
+        string BodyMarkdown,
         string ArticleUrl);
 
     /// <summary>Dapper row shape of <see cref="GetApprovedForFacebookAsync"/> — adds the chosen
