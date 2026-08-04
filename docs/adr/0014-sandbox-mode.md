@@ -48,8 +48,8 @@ Option 4. A `Sandbox` hosting environment runs side by side with live, isolated 
 - **forced overrides in code, not configuration**: `Facebook:DryRun` is always on and
   `Publishing:FacebookOnly` is always off for the sandbox, overriding whatever its own config says.
 
-The live worker also moves from `bin\Debug\net10.0` to `C:\apps\newsroom`, so the two instances no
-longer contend for locked DLLs.
+This dev machine's `Development` worker also moves from `bin\Debug\net10.0` to `C:\apps\newsroom`,
+so the two instances no longer contend for locked DLLs.
 
 ## Consequences
 
@@ -59,4 +59,5 @@ instances share the Gemini free-tier key, so the sandbox consumes the live daily
 contained by small per-stage `DailyRequestBudget` values, not eliminated. The guard protects
 destinations, not the Telegram chat: the worker cannot recognise the editors' chat id, so a
 sandbox pointed at it would still post there — visibly marked, but posted. In exchange,
-`dotnet build` and F5 stop interrupting the live pipeline.
+`dotnet build` and F5 stop interrupting this dev machine's `Development` worker (the live pipeline
+itself runs on the VPS and was never affected by builds on this machine).

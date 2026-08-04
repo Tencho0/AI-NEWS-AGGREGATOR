@@ -121,10 +121,12 @@ Get-Process Newsroom.Worker -ErrorAction SilentlyContinue |
 
 ## Troubleshooting
 
-- **Script reports `Sandbox worker exited`** — the fail-closed guard refused to start. The
-  script's own tailed log shows the violation(s) (e.g. a database not ending `_Sandbox`, a site
-  URL that is not `localhost`/`127.0.0.1`, or an image root without `sandbox` in it). Fix the
-  named setting and run the script again.
+- **Script reports `Sandbox worker exited`** — the fail-closed guard refused to start. The guard
+  throws before Serilog's file sink is built, so the violation(s) never reach `sandbox-<date>.log`
+  — the script prints them straight from `.sandbox\logs\restart-stdout.log` (and
+  `restart-stderr.log`) instead, right there in the console. It reports things like a database not
+  ending `_Sandbox`, a site URL that is not `localhost`/`127.0.0.1`, or an image root without
+  `sandbox` in it. Fix the named setting(s) and run the script again.
 - **Script reports a worker running from `bin\Debug`** — stop the F5-launched `Sandbox` instance
   (or vice versa) before rerunning; only one sandbox instance may run at a time.
 - **Log file is `newsroom-<date>.log` instead of `sandbox-<date>.log`** — the

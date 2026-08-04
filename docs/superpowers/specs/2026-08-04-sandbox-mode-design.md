@@ -138,10 +138,11 @@ itself a violation.
 3. **Override**, not merely validate — configuration is not trusted:
    - `FacebookOptions` is registered as `facebookOptions with { DryRun = true }`. Both are `sealed
      record`s with `init` properties, so this is a one-line non-destructive mutation. Every
-     Facebook path — `PublishJob`, the `Facebook:TestPostDraftId` hook in
-     `FacebookTestPostService`, `WatchdogJob`'s token check — then runs through
+     Facebook path — `PublishJob`'s publish attempts, the `Facebook:TestPostDraftId` hook in
+     `FacebookTestPostService`, and `PublishJob`'s own daily token health check
+     (`CheckTokenHealthAsync`, which calls `FacebookPublisher.CheckTokenAsync`) — then runs through
      `FacebookPublisher`'s existing dry-run branch, which logs the would-be post and returns
-     `DryRunPostId` without an HTTP call.
+     `DryRunPostId` without an HTTP call. (`WatchdogJob` does no Facebook token check of its own.)
    - `PublishingOptions` is registered as `publishingOptions with { FacebookOnly = false }`.
      Without this the sandbox would inherit the live `FacebookOnly=true` posture and skip the
      Umbraco leg entirely — nothing would ever reach the local site, which is the feature.

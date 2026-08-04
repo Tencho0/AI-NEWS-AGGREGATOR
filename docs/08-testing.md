@@ -47,8 +47,9 @@ above once they exist and record the outcome here; if any step fails, stop and r
 papering over it.
 
 Automated coverage for the isolation mechanism itself (not the end-to-end flow, which is manual by
-design): `SandboxOptionsTests` (17 cases — the fail-closed startup guard) and
-`SandboxTelegramGatewayTests` (7 cases — the 🧪 SANDBOX message prefix).
+design): `SandboxOptionsTests` (22 cases — the fail-closed startup guard's `Violations` logic, plus
+the `Sandbox:Enabled` master switch that gates the guard, both forced overrides and the Telegram
+marker) and `SandboxTelegramGatewayTests` (7 cases — the 🧪 SANDBOX message prefix).
 
 ## CI (GitHub Actions)
 
