@@ -1,16 +1,20 @@
 <#
 .SYNOPSIS
-    Restarts the Newsroom worker hidden on the dev machine (docs/runbooks/start-the-worker.md).
+    Releases and restarts the live Newsroom worker from its own folder
+    (docs/runbooks/start-the-worker.md).
 .DESCRIPTION
-    Stops any running Newsroom.Worker instance first (only one may run at a time, and a running
-    worker locks the DLL so the build would fail), rebuilds Debug, then launches the built .exe
-    detached with no window (Option B in the runbook). Logs go to
-    src\Newsroom.Worker\bin\Debug\net10.0\logs\newsroom-<date>.log.
+    The live worker runs from $LiveRoot, NOT from src\Newsroom.Worker\bin\Debug — that folder
+    belongs to development builds and the sandbox F5 profile (docs/adr/0014-sandbox-mode.md).
+    Keeping them apart means a dotnet build no longer has to kill the live pipeline.
+    Stops only processes whose executable lives under $LiveRoot, publishes Debug on top, then
+    relaunches detached with no window. Logs go to $LiveRoot\logs\newsroom-<date>.log.
 .EXAMPLE
     .\tools\restart-worker.ps1
 #>
 [CmdletBinding()]
-param()
+param(
+    [string]$LiveRoot = "C:\apps\newsroom"
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -18,9 +22,11 @@ try {
     $repoRoot = Split-Path -Parent $PSScriptRoot
     Set-Location $repoRoot
 
-    $running = Get-Process Newsroom.Worker -ErrorAction SilentlyContinue
+    # Match on path, never on name alone: a sandbox worker is the same executable name.
+    $running = Get-Process Newsroom.Worker -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -and $_.Path.StartsWith($LiveRoot, [StringComparison]::OrdinalIgnoreCase) }
     if ($running) {
-        Write-Host "Stopping running Newsroom.Worker (PID $($running.Id -join ', '))..."
+        Write-Host "Stopping the live worker (PID $($running.Id -join ', '))..."
         try {
             $running | Stop-Process -Force -ErrorAction Stop
         }
@@ -31,37 +37,40 @@ try {
             Start-Process -FilePath "taskkill.exe" -ArgumentList "/F $ids" -Verb RunAs -Wait -WindowStyle Hidden
         }
         Start-Sleep -Seconds 2
-        if (Get-Process Newsroom.Worker -ErrorAction SilentlyContinue) {
-            throw "Could not stop the running worker. Stop it from an elevated PowerShell: Get-Process Newsroom.Worker | Stop-Process -Force"
+        $still = Get-Process Newsroom.Worker -ErrorAction SilentlyContinue |
+            Where-Object { $_.Path -and $_.Path.StartsWith($LiveRoot, [StringComparison]::OrdinalIgnoreCase) }
+        if ($still) {
+            throw "Could not stop the live worker. Stop it from an elevated PowerShell: Get-Process Newsroom.Worker | Stop-Process -Force"
         }
     }
     else {
-        Write-Host "No running Newsroom.Worker instance found - starting fresh."
+        Write-Host "No live worker running - starting fresh."
     }
 
-    Write-Host "Building..."
-    dotnet build src\Newsroom.Worker\Newsroom.Worker.csproj -c Debug
-    if ($LASTEXITCODE -ne 0) { throw "dotnet build failed with exit code $LASTEXITCODE." }
+    Write-Host "Publishing to '$LiveRoot'..."
+    dotnet publish src\Newsroom.Worker\Newsroom.Worker.csproj -c Debug -o $LiveRoot
+    if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXITCODE." }
 
-    # Development is what makes the app load dotnet user-secrets (Gemini, Telegram, Facebook).
+    # Development is what makes the app load the LIVE dotnet user-secrets (Gemini, Telegram,
+    # Facebook). The sandbox uses DOTNET_ENVIRONMENT=Sandbox and a different secrets store.
     $env:DOTNET_ENVIRONMENT = 'Development'
-    $dir = Resolve-Path "src\Newsroom.Worker\bin\Debug\net10.0"
-    Write-Host "Starting hidden from '$dir'..."
-    Start-Process -FilePath "$dir\Newsroom.Worker.exe" -WorkingDirectory $dir -WindowStyle Hidden
+    Write-Host "Starting hidden from '$LiveRoot'..."
+    Start-Process -FilePath "$LiveRoot\Newsroom.Worker.exe" -WorkingDirectory $LiveRoot -WindowStyle Hidden
 
     Start-Sleep -Seconds 5
-    $proc = Get-Process Newsroom.Worker -ErrorAction SilentlyContinue
-    if (-not $proc) { throw "Worker did not stay up - check the newest log under '$dir\logs'." }
-    Write-Host "Worker running (PID $($proc.Id -join ', '))."
+    $proc = Get-Process Newsroom.Worker -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -and $_.Path.StartsWith($LiveRoot, [StringComparison]::OrdinalIgnoreCase) }
+    if (-not $proc) { throw "Worker did not stay up - check the newest log under '$LiveRoot\logs'." }
+    Write-Host "Live worker running (PID $($proc.Id -join ', '))."
 
-    $log = Get-ChildItem "$dir\logs\newsroom-*.log" -ErrorAction SilentlyContinue |
+    $log = Get-ChildItem "$LiveRoot\logs\newsroom-*.log" -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime | Select-Object -Last 1
     if ($log) {
         Write-Host "--- $($log.Name) (last 6 lines) ---"
         Get-Content $log.FullName -Tail 6
     }
     else {
-        Write-Host "No log file yet - check '$dir\logs' in a minute."
+        Write-Host "No log file yet - check '$LiveRoot\logs' in a minute."
     }
     exit 0
 }

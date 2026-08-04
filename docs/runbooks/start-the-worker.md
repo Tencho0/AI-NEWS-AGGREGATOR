@@ -1,10 +1,15 @@
 # Runbook — Start the Worker (dev machine)
 
-**Status:** Agreed · **Last updated:** 2026-07-09
+**Status:** Agreed · **Last updated:** 2026-08-04
 
 How to start / stop / check the Newsroom worker **on this dev machine, by yourself** — no Claude
 session needed. (For the VPS/production install see [deploy.md](deploy.md) and
 [restore-after-vps-restart.md](restore-after-vps-restart.md).)
+
+> **Where it runs from:** the live worker runs from `C:\apps\newsroom`, not from
+> `src\Newsroom.Worker\bin\Debug\net10.0` — that folder is now development/F5 and the sandbox
+> profile only (see [ADR-0014](../adr/0014-sandbox-mode.md)). Keeping them apart means a
+> `dotnet build` no longer has to kill the live pipeline.
 
 > **Why it keeps stopping:** if the worker is started from inside a Claude Code chat, it dies when
 > that chat/session closes. Start it with **Option B (detached)** below and it survives closing the
@@ -38,15 +43,15 @@ dotnet run --project src\Newsroom.Worker -c Debug
 
 ## Option B — Detached start (keeps running after you close the terminal) ← use this
 
-Build once, then launch the built .exe as its own process. `-WindowStyle Hidden` means **no
-window at all**, so there is nothing to accidentally close — you can shut every terminal and it
-keeps running:
+Publish once to the live worker's own folder, `C:\apps\newsroom` (**not** `bin\Debug` — that's
+development/sandbox-only now, see the note above), then launch the published .exe as its own
+process. `-WindowStyle Hidden` means **no window at all**, so there is nothing to accidentally
+close — you can shut every terminal and it keeps running:
 
 ```powershell
-dotnet build src\Newsroom.Worker\Newsroom.Worker.csproj -c Debug   # rebuild after any code change
+dotnet publish src\Newsroom.Worker\Newsroom.Worker.csproj -c Debug -o C:\apps\newsroom   # after any code change
 $env:DOTNET_ENVIRONMENT = 'Development'
-$dir = Resolve-Path "src\Newsroom.Worker\bin\Debug\net10.0"
-Start-Process -FilePath "$dir\Newsroom.Worker.exe" -WorkingDirectory $dir -WindowStyle Hidden
+Start-Process -FilePath "C:\apps\newsroom\Newsroom.Worker.exe" -WorkingDirectory "C:\apps\newsroom" -WindowStyle Hidden
 ```
 
 **One-liner for the whole restart** — `tools\restart-worker.ps1` does exactly the above, after
@@ -59,7 +64,7 @@ stopping any running instance (section 4) and checking the new one stayed up:
 If the running instance was started from an *elevated* prompt, a normal session cannot kill it; the
 script asks for elevation (UAC) for the stop step only, so the worker comes back up unelevated.
 
-It now runs independently. Logs go to `src\Newsroom.Worker\bin\Debug\net10.0\logs\newsroom-<date>.log`
+It now runs independently. Logs go to `C:\apps\newsroom\logs\newsroom-<date>.log`
 (there is no live console, so watch the log file — see section 3).
 
 > **Which window can I close?** If you drop `-WindowStyle Hidden`, the worker opens its **own**
@@ -73,7 +78,7 @@ It now runs independently. Logs go to `src\Newsroom.Worker\bin\Debug\net10.0\log
 ```powershell
 Get-Process Newsroom.Worker -ErrorAction SilentlyContinue   # a row = running; nothing = stopped
 # last few log lines (detached / Option B path):
-Get-Content (Get-ChildItem "src\Newsroom.Worker\bin\Debug\net10.0\logs\newsroom-*.log" |
+Get-Content (Get-ChildItem "C:\apps\newsroom\logs\newsroom-*.log" |
     Sort-Object LastWriteTime | Select-Object -Last 1).FullName -Tail 6
 ```
 
@@ -88,6 +93,23 @@ Get-Process Newsroom.Worker -ErrorAction SilentlyContinue | Stop-Process -Force
 ```
 
 (Or, if you used Option A, just Ctrl+C in its window.)
+
+## Rolling back
+
+If `C:\apps\newsroom` is ever unusable and the worker needs to run from the old location, stop it
+(section 4) and start it the pre-2026-08-04 way — nothing else about the app changed, so this
+still works exactly as before:
+
+```powershell
+dotnet build src\Newsroom.Worker\Newsroom.Worker.csproj -c Debug
+$env:DOTNET_ENVIRONMENT = 'Development'
+$dir = Resolve-Path "src\Newsroom.Worker\bin\Debug\net10.0"
+Start-Process -FilePath "$dir\Newsroom.Worker.exe" -WorkingDirectory $dir -WindowStyle Hidden
+```
+
+`tools\restart-worker.ps1` will not manage an instance started this way — it only stops and checks
+processes whose path is under `C:\apps\newsroom` (or whatever `-LiveRoot` you pass it) — so stop
+and verify this one by hand.
 
 ## 5. Publishing mode (what it does when running)
 
@@ -111,10 +133,15 @@ dotnet user-secrets set "Publishing:FacebookOnly" "false" --project src\Newsroom
 
 ## Notes
 
-- **After changing code**, rebuild before Option B (the `dotnet build` line). Stop the running
-  instance first — a running worker locks the DLL and the build fails.
+- **After changing code**, republish before Option B (the `dotnet publish` line). Stop the running
+  instance first — a running worker locks its own files under `C:\apps\newsroom` and the publish
+  fails.
 - **Drafting is paused** if you set it so via Telegram `/pause`; `/resume` to re-enable. Scraping and
   Telegram review run regardless.
 - The `dotnet run` (Option A) working dir is `src\Newsroom.Worker`, so its logs and `editor-uploads`
-  live there; the detached .exe (Option B) uses `bin\Debug\net10.0`. Editor photo uploads are read
-  from disk at publish time, so keep starting it the same way (don't mix A and B mid-review).
+  live there; the detached .exe (Option B) now runs from `C:\apps\newsroom` instead. Editor photo
+  uploads are read from disk at publish time, so keep starting it the same way (don't mix A and B
+  mid-review).
+- `src\Newsroom.Worker\bin\Debug\net10.0` is development/F5 and sandbox territory only now (see
+  [ADR-0014](../adr/0014-sandbox-mode.md)); it is no longer where the live worker runs from, which
+  is why a plain `dotnet build` no longer needs the live pipeline stopped first.
