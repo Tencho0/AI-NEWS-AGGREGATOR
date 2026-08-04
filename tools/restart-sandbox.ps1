@@ -23,6 +23,11 @@ param()
 
 $ErrorActionPreference = "Stop"
 
+# The logs are UTF-8 and carry Cyrillic source names plus the banner's emoji. Windows PowerShell
+# 5.1 decodes with the ANSI codepage by default and renders mojibake, so every Get-Content below
+# passes -Encoding UTF8 and the console is switched to UTF-8 for the tail to display correctly.
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
 try {
     $repoRoot = Split-Path -Parent $PSScriptRoot
     Set-Location $repoRoot
@@ -71,9 +76,9 @@ try {
         Write-Host "Sandbox did not stay up - the guard most likely refused it. Startup output:"
         if (Test-Path $startupStdout) {
             Write-Host "--- $startupStdout ---"
-            Get-Content $startupStdout -Tail 40
+            Get-Content $startupStdout -Tail 40 -Encoding UTF8
         }
-        $stderrContent = if (Test-Path $startupStderr) { Get-Content $startupStderr -Tail 40 } else { $null }
+        $stderrContent = if (Test-Path $startupStderr) { Get-Content $startupStderr -Tail 40 -Encoding UTF8 } else { $null }
         if ($stderrContent) {
             Write-Host "--- $startupStderr ---"
             $stderrContent
@@ -86,7 +91,7 @@ try {
         Sort-Object LastWriteTime | Select-Object -Last 1
     if ($log) {
         Write-Host "--- $($log.Name) (last 10 lines - look for the SANDBOX MODE banner) ---"
-        Get-Content $log.FullName -Tail 10
+        Get-Content $log.FullName -Tail 10 -Encoding UTF8
     }
     else {
         Write-Host "No sandbox log yet - check '$sandboxRoot\logs' in a minute."

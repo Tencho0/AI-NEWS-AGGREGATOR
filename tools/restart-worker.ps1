@@ -28,6 +28,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# The logs are UTF-8 and carry Cyrillic source names. Windows PowerShell 5.1 decodes with the ANSI
+# codepage by default and renders mojibake, so the tail below passes -Encoding UTF8 and the console
+# is switched to UTF-8 to display it correctly.
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
 try {
     $repoRoot = Split-Path -Parent $PSScriptRoot
     Set-Location $repoRoot
@@ -83,7 +88,7 @@ try {
         Sort-Object LastWriteTime | Select-Object -Last 1
     if ($log) {
         Write-Host "--- $($log.Name) (last 6 lines) ---"
-        Get-Content $log.FullName -Tail 6
+        Get-Content $log.FullName -Tail 6 -Encoding UTF8
     }
     else {
         Write-Host "No log file yet - check '$LiveRoot\logs' in a minute."
