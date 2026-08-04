@@ -26,6 +26,16 @@ isolation is `SandboxOptions` and `SandboxTelegramGateway`; see
 
 ## First-time setup (once)
 
+0. **Trust the ASP.NET Core HTTPS development certificate.** The worker publishes to the local site
+   over HTTPS and its `HttpClient` validates the certificate, so an untrusted dev cert fails every
+   publish with `The SSL connection could not be established`:
+   ```powershell
+   dotnet dev-certs https --check --trust    # exit code 0 = already trusted, nothing to do
+   dotnet dev-certs https --trust            # only if the check failed; accept the Windows prompt
+   ```
+   > Do **not** verify this with `curl -k` / `--insecure` — that skips certificate validation,
+   > which is precisely the check that fails, so it reports success while the worker still cannot
+   > connect. Use `Invoke-RestMethod` (which validates) or just watch the publish succeed.
 1. **Create the sandbox bot.** Message `@BotFather` on Telegram, send `/newbot`, and name it so it
    is obviously not the live one (e.g. `Predel Newsroom SANDBOX`). Keep the token it gives you.
    Then send the new bot any message and read your own numeric user id and the chat id from:
