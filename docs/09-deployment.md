@@ -1,6 +1,6 @@
 # 09 — Deployment Strategy
 
-**Status:** Draft · **Last updated:** 2026-07-02
+**Status:** Draft · **Last updated:** 2026-08-04
 
 ## Target environment
 
@@ -18,11 +18,24 @@ C:\apps\newsroom\appsettings.Production.json   # secrets, ACL-restricted, NOT in
 
 | Env | Where | Purpose |
 |---|---|---|
-| Local dev | dev machine + local SQL Express, test Telegram bot/chat, Umbraco dev site, FB dry-run flag | daily development |
+| Sandbox | This dev machine, and only this dev machine. `DOTNET_ENVIRONMENT=Sandbox`, the `Newsroom_Sandbox` database, the `newsroom-worker-sandbox` user-secrets store (never the live one), a separate Telegram bot, local Umbraco at `https://localhost:44350`, Facebook forced to dry-run in code regardless of config. Started with `tools\restart-sandbox.ps1`. A fail-closed guard refuses to start against anything that looks live. See [ADR-0014](adr/0014-sandbox-mode.md) and [runbooks/run-the-sandbox.md](runbooks/run-the-sandbox.md). | daily development against the full pipeline — real scraping, real AI, real Telegram review — with no path to the live database, site or Facebook page |
 | Staging = "dry-run mode on prod VPS" | same binaries, config flags: test chat, Umbraco dev/staging site, `Facebook:DryRun=true` | pre-release smoke |
-| Production | VPS service `PredelNewsroom` | live |
+| Production | Predel-News VPS, Windows Service `PredelNewsroom`, `C:\apps\newsroom` | live |
 
 (A separate staging VPS is deliberately out of scope for v1 — dry-run flags substitute.)
+
+**This dev machine does not run the live pipeline.** The live worker is the VPS Windows Service
+above, running from its own `C:\apps\newsroom` on that host — see
+[runbooks/release-a-new-version.md](runbooks/release-a-new-version.md) and
+[runbooks/deploy.md](runbooks/deploy.md) for how it got there and how a new version ships. Before
+the sandbox existed, the only way to develop on this dev machine was a second,
+`Development`-environment worker that shares the live Telegram bot token, Gemini key and Facebook
+credentials (via this machine's own `dotnet user-secrets`) with the VPS instance; that worker now
+runs from its own local `C:\apps\newsroom` rather than `bin\Debug` (so a plain `dotnet build` no
+longer needs it stopped first), but it is still a different folder on a different machine from the
+VPS's `C:\apps\newsroom`, and it is not where live belongs — see
+[runbooks/start-the-worker.md](runbooks/start-the-worker.md) for the full caveat. The Sandbox
+environment above is what this dev machine should actually run day to day.
 
 ## Install & release process
 

@@ -6,16 +6,19 @@ endpoint) and ADR-0008 (Facebook Page only)
 
 ## Context
 
-There is no development environment: the live pipeline **is** a local dev run out of
+There is no development environment: this dev machine's own worker runs out of
 `src\Newsroom.Worker\bin\Debug\net10.0`, started with `DOTNET_ENVIRONMENT=Development` — which is
 exactly what loads the user-secrets store holding the real Telegram bot, the real Gemini key,
-`Facebook:DryRun=false`, and the live page token. Any second run started for development today
-inherits all of it, plus the live `Newsroom` database and the shared default image root
-`%ProgramData%\PredelNewsroom\images`, whose files a second instance's own `RetentionJob` would
-delete. The live worker also holds a lock on its own `bin\Debug` DLLs, so every `dotnet build`
-requires killing the live pipeline first. The editor wants to develop against the full pipeline —
-real Telegram review cards, tap Approve — with the article landing on a local Umbraco site and
-nothing whatsoever reaching the real Predel News Facebook page.
+`Facebook:DryRun=false`, and the live page token. (The live pipeline itself runs as the Windows
+Service `PredelNewsroom` on the Predel-News VPS, not on this dev machine — but this machine's
+`Development` worker shares the *same* live Telegram bot token, so it is not a harmless local copy
+either.) Any second run started for development today inherits all of it, plus this dev machine's
+own `Newsroom` database and the shared default image root `%ProgramData%\PredelNewsroom\images`,
+whose files a second instance's own `RetentionJob` would delete. The `Development` worker also
+holds a lock on its own `bin\Debug` DLLs, so every `dotnet build` requires stopping it first. The
+editor wants to develop against the full pipeline — real Telegram review cards, tap Approve — with
+the article landing on a local Umbraco site and nothing whatsoever reaching the real Predel News
+Facebook page.
 
 ## Options considered
 

@@ -46,7 +46,8 @@ real paths and commands for the live host. Reach for these first when operating 
 | [deploy.md](runbooks/deploy.md) | The worker's general deploy procedure and first-time install behind the above. |
 | [rollback.md](runbooks/rollback.md) | A release misbehaves and you need the previous binaries back. |
 | [move-to-a-new-host.md](runbooks/move-to-a-new-host.md) | Moving both applications to a different server. Inventories all thirteen pieces of state that do not travel with the code, and the order to rebuild them. Needed before Server 2012 R2's ESU ends 2026-10-13. |
-| [start-the-worker.md](runbooks/start-the-worker.md) | Getting the worker running locally for development. |
+| [start-the-worker.md](runbooks/start-the-worker.md) | Running this dev machine's own `Development`-environment worker — not the live pipeline, see the caveat inside. |
+| [run-the-sandbox.md](runbooks/run-the-sandbox.md) | Developing against the full pipeline on this dev machine — real scraping, AI, Telegram review — without any path to the live database, site or Facebook page. |
 | [restore-after-vps-restart.md](runbooks/restore-after-vps-restart.md) | The host rebooted and things did not come back. |
 | [add-a-source.md](runbooks/add-a-source.md) | Adding a news feed to monitor. |
 | [add-a-public-figure.md](runbooks/add-a-public-figure.md) | Registering a reference photo so covers can depict a named person. |

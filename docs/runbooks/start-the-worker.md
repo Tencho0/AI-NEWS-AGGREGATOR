@@ -2,14 +2,30 @@
 
 **Status:** Agreed · **Last updated:** 2026-08-04
 
-How to start / stop / check the Newsroom worker **on this dev machine, by yourself** — no Claude
-session needed. (For the VPS/production install see [deploy.md](deploy.md) and
+> **This is not the live pipeline.** The live pipeline is the Windows Service `PredelNewsroom` on
+> the Predel-News VPS — see [release-a-new-version.md](release-a-new-version.md) and
+> [deploy.md](deploy.md). What this document starts is a second, `Development`-environment worker
+> **on this dev machine**, which loads this machine's own `dotnet user-secrets` store — and that
+> store still holds the *real* Telegram bot token, Gemini key and Facebook Page token (set before
+> the VPS existed, never withdrawn). Running it is not harmless: on 2026-08-04, doing exactly this
+> collided with the VPS's own poller (`409 Conflict: terminated by other getUpdates request`) and
+> sent one duplicate live daily-digest message before it was caught and killed (see
+> [ADR-0014](../adr/0014-sandbox-mode.md) and [decision-log.md](../decision-log.md)). **For
+> day-to-day development, use [run-the-sandbox.md](run-the-sandbox.md) instead** — it is
+> fail-closed against the live database, site and Facebook page. Only follow the rest of this
+> document when you deliberately need this machine's live secrets running locally, and confirm
+> nothing else is polling the same bot token first.
+
+How to start / stop / check this worker **on this dev machine, by yourself** — no Claude session
+needed. (For the VPS/production install see
+[release-a-new-version.md](release-a-new-version.md) and [deploy.md](deploy.md); for a reboot see
 [restore-after-vps-restart.md](restore-after-vps-restart.md).)
 
-> **Where it runs from:** the live worker runs from `C:\apps\newsroom`, not from
-> `src\Newsroom.Worker\bin\Debug\net10.0` — that folder is now development/F5 and the sandbox
-> profile only (see [ADR-0014](../adr/0014-sandbox-mode.md)). Keeping them apart means a
-> `dotnet build` no longer has to kill the live pipeline.
+> **Where it runs from:** on this dev machine, this `Development`-environment worker runs from its
+> own `C:\apps\newsroom` — a local folder, distinct from the identically-named `C:\apps\newsroom` on
+> the VPS — not from `src\Newsroom.Worker\bin\Debug\net10.0`, which is development/F5 and the
+> sandbox profile only (see [ADR-0014](../adr/0014-sandbox-mode.md)). Keeping them apart means a
+> `dotnet build` no longer has to stop this worker first.
 
 > **Why it keeps stopping:** if the worker is started from inside a Claude Code chat, it dies when
 > that chat/session closes. Start it with **Option B (detached)** below and it survives closing the
@@ -23,10 +39,13 @@ session needed. (For the VPS/production install see [deploy.md](deploy.md) and
   Start-Service MSSQLSERVER          # only if it is stopped
   ```
 - **Secrets are already set** in `dotnet user-secrets` for `Newsroom.Worker` (Gemini, Telegram,
-  Facebook). You do **not** need to re-enter them. `DOTNET_ENVIRONMENT=Development` is what makes
-  the app load them — every start command below sets it.
-- **Only one instance at a time.** Two running copies both long-poll Telegram and fight over it.
-  Always stop a running instance (section 4) before starting a new one.
+  Facebook) — the real ones, per the warning above. You do **not** need to re-enter them.
+  `DOTNET_ENVIRONMENT=Development` is what makes the app load them — every start command below
+  sets it.
+- **Only one instance at a time — and that is not just about this machine.** Two running copies
+  both long-poll Telegram and fight over it, and the VPS's live instance already polls with this
+  same bot token, so starting this worker also contends with it. Always stop a running instance
+  here (section 4) before starting a new one, and don't leave it running unattended.
 - Open **PowerShell in the repo root**:
   ```powershell
   cd "C:\Users\TenchoBostandzhiev\source\GitHub -Tencho Bostandzhiev\AI-NEWS-AGGREGATOR"
@@ -49,9 +68,9 @@ dotnet run --project src\Newsroom.Worker -c Debug --launch-profile Newsroom.Work
 
 ## Option B — Detached start (keeps running after you close the terminal) ← use this
 
-Publish once to the live worker's own folder, `C:\apps\newsroom` (**not** `bin\Debug` — that's
-development/sandbox-only now, see the note above), then launch the published .exe as its own
-process. `-WindowStyle Hidden` means **no window at all**, so there is nothing to accidentally
+Publish once to this worker's own folder, `C:\apps\newsroom` on this dev machine (**not**
+`bin\Debug` — that's development/sandbox-only now, see the note above), then launch the published
+.exe as its own process. `-WindowStyle Hidden` means **no window at all**, so there is nothing to accidentally
 close — you can shut every terminal and it keeps running:
 
 ```powershell
@@ -119,7 +138,9 @@ and verify this one by hand.
 
 ## 5. Publishing mode (what it does when running)
 
-Currently set (in user-secrets) to **Facebook-only, live**:
+This is real, live configuration — the same secrets the VPS instance uses, just held in this
+machine's own user-secrets store instead ([06-security.md](../06-security.md)). Currently set (in
+user-secrets) to **Facebook-only, live**:
 
 - `Publishing:FacebookOnly = true` → skips the website; approved drafts post straight to the FB page.
 - `Facebook:DryRun = false` → posts are **real**.
@@ -149,5 +170,9 @@ dotnet user-secrets set "Publishing:FacebookOnly" "false" --project src\Newsroom
   uploads are read from disk at publish time, so keep starting it the same way (don't mix A and B
   mid-review).
 - `src\Newsroom.Worker\bin\Debug\net10.0` is development/F5 and sandbox territory only now (see
-  [ADR-0014](../adr/0014-sandbox-mode.md)); it is no longer where the live worker runs from, which
-  is why a plain `dotnet build` no longer needs the live pipeline stopped first.
+  [ADR-0014](../adr/0014-sandbox-mode.md)); it is no longer where this worker runs from, which is
+  why a plain `dotnet build` no longer needs it stopped first.
+- **This dev machine runs the sandbox day to day** — see
+  [run-the-sandbox.md](run-the-sandbox.md). This document is for the narrower case of needing this
+  machine's live secrets running locally; it is not where the live pipeline belongs, and it is not
+  the default way to develop.
