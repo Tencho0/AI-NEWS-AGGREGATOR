@@ -58,13 +58,19 @@ IIS or reboot the machine.
 ### Where the release scripts live on the host
 
 The scripts are **not** deployed with either application — they are copied to the host separately
-and kept there. Canonical locations:
+and kept there. Locations as used on this host:
 
 | Folder | Contents | From |
 |---|---|---|
-| `C:\deploy\site-tools\` | `deploy.ps1`, `rollback.ps1`, `preflight.ps1`, `sql-check.ps1`, `README.txt` | Predel-News `tools/` |
-| `C:\deploy\worker-tools\` | `deploy.ps1`, `rollback.ps1`, `install-service.ps1`, `seed-sources.sql`, `check-dotnet-runtime.ps1`, `list-dotnet-versions.ps1`, `README.txt` | AI-NEWS-AGGREGATOR `tools/` |
+| `C:\Users\Administrator\Desktop\predelnews-scripts\site-tools\` | `deploy.ps1`, `rollback.ps1`, `preflight.ps1`, `sql-check.ps1`, `README.txt` | Predel-News `tools/` |
+| `C:\Users\Administrator\Desktop\predelnews-scripts\worker-tools\` | `deploy.ps1`, `rollback.ps1`, `install-service.ps1`, `seed-sources.sql`, `check-dotnet-runtime.ps1`, `list-dotnet-versions.ps1`, `README.txt` | AI-NEWS-AGGREGATOR `tools/` |
 | `C:\deploy\` | staging: the publish zip and the folder it is extracted to | transient, delete after a release |
+
+Note that `predelnews-scripts` sits in the **`Administrator` profile**, so it is invisible to any
+other administrator account and would be lost if that profile were reset or the host rebuilt. That
+is acceptable while one person operates the box — the scripts are versioned in the two repos and can
+be re-copied at any time — but it is the reason a rebuild starts by fetching them again rather than
+finding them in place.
 
 **Both folders contain a `deploy.ps1` and a `rollback.ps1` with identical names and different
 jobs** — one drives an IIS app pool, the other a Windows service. Keep them in separate folders and
@@ -137,7 +143,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 Remove-Item C:\deploy\publish -Recurse -Force -ErrorAction SilentlyContinue
 [System.IO.Compression.ZipFile]::ExtractToDirectory("C:\deploy\predelnews-publish.zip", "C:\deploy\publish")
 
-cd <site tools folder>
+cd C:\Users\Administrator\Desktop\predelnews-scripts\site-tools
 .\deploy.ps1 -PublishSource C:\deploy\publish -SkipSmokeTest
 ```
 
@@ -182,7 +188,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 Remove-Item C:\deploy\workerpub -Recurse -Force -ErrorAction SilentlyContinue
 [System.IO.Compression.ZipFile]::ExtractToDirectory("C:\deploy\newsroom-worker-publish.zip", "C:\deploy\workerpub")
 
-cd <worker tools folder>
+cd C:\Users\Administrator\Desktop\predelnews-scripts\worker-tools
 .\deploy.ps1 -PublishSource C:\deploy\workerpub
 ```
 
