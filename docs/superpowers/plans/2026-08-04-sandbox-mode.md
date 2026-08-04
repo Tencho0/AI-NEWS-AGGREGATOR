@@ -937,30 +937,49 @@ Replace `var host = builder.Build();` and the `host.Run();` that follows it with
 
 `ILogger<Program>` resolves against the implicit `Program` class that top-level statements generate; it is accessible within this assembly.
 
-- [ ] **Step 6: Verify the live path is unchanged**
+- [ ] **Step 6: Verify the live path is unchanged (corrected 2026-08-04 — see Step 7's warning)**
 
 Run: `dotnet build Newsroom.slnx`
 Expected: clean.
 
-Then prove `Sandbox:Enabled=false` changes nothing:
+Then prove `Sandbox:Enabled=false` changes nothing. **Do not use `dotnet run`** — with the
+`Sandbox` profile now first in `src\Newsroom.Worker\Properties\launchSettings.json`, a bare
+`dotnet run` applies *that* profile's `environmentVariables` and overrides whatever
+`DOTNET_ENVIRONMENT` you export in the shell first. Launch the built `.exe` directly instead, with
+the environment variable set for that process only:
 
 ```powershell
 $env:DOTNET_ENVIRONMENT = 'Development'
-dotnet run --project src\Newsroom.Worker\Newsroom.Worker.csproj
+& "src\Newsroom.Worker\bin\Debug\net10.0\Newsroom.Worker.exe"
 ```
 
 Expected: normal startup, **no** `SANDBOX MODE` line. Stop it with Ctrl+C after the jobs report started.
 
-**Careful:** this runs a second worker against the live database and the live Telegram bot for a few seconds. It will contend with the live poller. Keep it short, or ask the owner to stop the live worker first. If in doubt, skip this step and rely on Step 7 plus the live worker's own log.
+**Careful:** this dev machine's `Development`-environment secrets store still points at the same
+live Telegram bot token as the VPS instance (the live pipeline itself now runs on the Predel-News
+VPS, not here — see `docs/runbooks/run-the-sandbox.md`). So this step starts a second poller on
+that token for a few seconds, contending with the VPS worker's `getUpdates`. Keep it short, or ask
+the owner first. If in doubt, skip this step and rely on Step 7 plus the VPS worker's own log.
 
 - [ ] **Step 7: Verify the guard actually refuses**
 
-Prove the fail-closed path with a deliberately live-looking database, without touching any committed file:
+Prove the fail-closed path with a deliberately live-looking database, without touching any
+committed file.
+
+> **Warning — do not use `dotnet run` for this.** During this task's first verification pass, a
+> `dotnet run` here silently applied a launch profile whose `environmentVariables` overrode the
+> `DOTNET_ENVIRONMENT=Sandbox` this step exports in the shell — `dotnet run` with no
+> `--launch-profile` always applies the *first* profile in `launchSettings.json`, regardless of
+> what the shell's environment already says. The result loaded the live secrets store instead of
+> the sandbox one and sent a duplicate digest to the real editors' Telegram chat before it was
+> killed. Always launch the built executable directly instead, with the environment variables set
+> for that process only:
 
 ```powershell
+dotnet build Newsroom.slnx
 $env:DOTNET_ENVIRONMENT = 'Sandbox'
 $env:ConnectionStrings__Newsroom = 'Server=.;Database=Newsroom;Integrated Security=True;TrustServerCertificate=True'
-dotnet run --project src\Newsroom.Worker\Newsroom.Worker.csproj
+& "src\Newsroom.Worker\bin\Debug\net10.0\Newsroom.Worker.exe"
 ```
 
 Expected: exits non-zero with `Sandbox mode refused to start:` and a bullet naming database `Newsroom`. No job starts, nothing connects to Telegram.
