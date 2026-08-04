@@ -36,9 +36,15 @@ session needed. (For the VPS/production install see [deploy.md](deploy.md) and
 
 Runs in the window; you see the live log; **closing the window or Ctrl+C stops it.**
 
+> `dotnet run` applies a launch profile, and a launch profile's `environmentVariables` win over
+> whatever `DOTNET_ENVIRONMENT` you export in the shell first. With no `--launch-profile` named,
+> `dotnet run` applies whichever profile is *first* in `launchSettings.json` — currently `Sandbox`,
+> not `Newsroom.Worker` (see [ADR-0014](../adr/0014-sandbox-mode.md)). `--launch-profile` below
+> pins it explicitly, so this command loads `Development` regardless of profile order.
+
 ```powershell
 $env:DOTNET_ENVIRONMENT = 'Development'
-dotnet run --project src\Newsroom.Worker -c Debug
+dotnet run --project src\Newsroom.Worker -c Debug --launch-profile Newsroom.Worker
 ```
 
 ## Option B — Detached start (keeps running after you close the terminal) ← use this
