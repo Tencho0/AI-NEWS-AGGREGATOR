@@ -164,9 +164,12 @@ try
     builder.Services.AddSingleton<IReviewRepository, ReviewRepository>();
     builder.Services.AddSingleton(_ => new Lazy<ITelegramGateway>(() =>
     {
+        var draftingOptions = GeminiDraftingOptions.From(builder.Configuration);
         ITelegramGateway gateway = new TelegramGateway(
             TelegramOptions.From(builder.Configuration).BotToken
-                ?? throw new InvalidOperationException("Telegram:BotToken is not configured."));
+                ?? throw new InvalidOperationException("Telegram:BotToken is not configured."),
+            draftingOptions.Categories,
+            draftingOptions.Regions);
         // Wrapping the gateway (not the renderer) also marks watchdog alerts and the daily digest.
         return sandbox.Enabled ? new SandboxTelegramGateway(gateway) : gateway;
     }));

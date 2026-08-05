@@ -5,6 +5,7 @@ using Newsroom.Core.Images;
 using Newsroom.Core.Operations;
 using Newsroom.Core.Publishing;
 using Newsroom.Core.Review;
+using Newsroom.Infrastructure.Ai;
 using Newsroom.Infrastructure.Images;
 using Newsroom.Infrastructure.Publishing;
 using Newsroom.Infrastructure.Review;
@@ -51,7 +52,9 @@ public sealed class TelegramJob(
         "\n" +
         "Върху картичка: ✅ одобри (веднага) · 📅 насрочи за предложения час · ✏️ промени · " +
         "🖼 друга снимка · ❌ откажи. " +
-        "Отговор с текст = инструкции за промяна; отговор със снимка = прикачи снимка.";
+        "Отговор с текст = инструкции за промяна; отговор със снимка = прикачи снимка.\n" +
+        "Редакторска статия (/post) без категория: избери от бутоните под картичката — тя не може " +
+        "да се одобри без категория. 🏷 после позволява промяна на категория/регион/тагове по всяко време.";
 
     /// <summary>Where editor photo uploads land — the editor-upload area of the persistent image
     /// storage root (ADR-0013), not the disposable install directory.</summary>
@@ -118,8 +121,14 @@ public sealed class TelegramJob(
             try
             {
                 var html = ReviewMessageRenderer.RenderHtml(view);
-                var messageId = await gateway.Value.SendHtmlAsync(
-                    options.ReviewChatId, html, withReviewButtons: true, view.DraftId, scheduleLabel, ct);
+                var messageId = view.IsManual
+                    ? await gateway.Value.SendManualCardAsync(
+                        options.ReviewChatId, html, view.DraftId,
+                        string.IsNullOrWhiteSpace(view.Category)
+                            ? ManualCardKeyboard.AwaitingCategory : ManualCardKeyboard.Resolved,
+                        scheduleLabel, ct)
+                    : await gateway.Value.SendHtmlAsync(
+                        options.ReviewChatId, html, withReviewButtons: true, view.DraftId, scheduleLabel, ct);
                 await reviews.SetTelegramMessageIdAsync(view.DraftId, messageId, ct);
                 logger.LogInformation("📨 Draft {DraftId} v{Version} posted for review (message {MessageId})",
                     view.DraftId, view.Version, messageId);
@@ -267,11 +276,22 @@ public sealed class TelegramJob(
     private async Task HandleCallbackAsync(
         TgCallback callback, TelegramOptions options, IReadOnlySet<long> allowedUsers, CancellationToken ct)
     {
-        var command = ReviewUpdateRouter.RouteCallback(callback, allowedUsers, options.ReviewChatId);
+        var draftingOptions = GeminiDraftingOptions.From(configuration);
+        var command = ReviewUpdateRouter.RouteCallback(
+            callback, allowedUsers, options.ReviewChatId, draftingOptions.Categories, draftingOptions.Regions);
         var editor = callback.UserName ?? callback.UserId.ToString();
         switch (command)
         {
             case ApproveDraft approve:
+                var approveView = await reviews.GetReviewViewAsync(approve.DraftId, ct);
+                if (approveView is { IsManual: true } && string.IsNullOrWhiteSpace(approveView.Category))
+                {
+                    // Defense in depth: the AwaitingCategory keyboard has no ✅ button, but
+                    // callback_data is not tied to what is currently rendered — a replayed or
+                    // crafted press must not approve an unpublishable draft.
+                    await gateway.Value.AnswerCallbackAsync(callback.CallbackId, "Първо избери категория", ct);
+                    break;
+                }
                 // TryApprove: the normal PendingReview → Approved path. TryUnschedule: ✅ on an
                 // already-📅-scheduled draft clears the gate — "now" beats the slot by design.
                 var transitioned =
@@ -297,6 +317,29 @@ public sealed class TelegramJob(
 
             case ScheduleDraft schedule:
                 await ScheduleDraftAsync(callback, schedule.DraftId, editor, ct);
+                break;
+
+            case SetDraftCategory setCategory:
+                await drafts.SetDraftCategoryAsync(setCategory.DraftId, setCategory.Category, ct);
+                await RerenderManualCardAsync(callback, setCategory.DraftId, expanded: false, ct);
+                await gateway.Value.AnswerCallbackAsync(callback.CallbackId, $"📎 {setCategory.Category}", ct);
+                logger.LogInformation("Draft {DraftId}: category set to {Category} by {Editor}",
+                    setCategory.DraftId, setCategory.Category, editor);
+                break;
+
+            case SetDraftRegion setRegion:
+                await drafts.SetDraftRegionAsync(setRegion.DraftId, setRegion.Region, ct);
+                await RerenderManualCardAsync(callback, setRegion.DraftId, expanded: false, ct);
+                await gateway.Value.AnswerCallbackAsync(callback.CallbackId, $"📍 {setRegion.Region}", ct);
+                logger.LogInformation("Draft {DraftId}: region set to {Region} by {Editor}",
+                    setRegion.DraftId, setRegion.Region, editor);
+                break;
+
+            case ShowMetaPicker meta:
+                await reviews.SetPendingTagsConversationAsync(callback.ChatId, callback.UserId, meta.DraftId, ct);
+                await RerenderManualCardAsync(callback, meta.DraftId, expanded: true, ct);
+                await gateway.Value.AnswerCallbackAsync(
+                    callback.CallbackId, "🏷 Избери по-горе или отговори тук с тагове", ct);
                 break;
 
             case Ignore ignore:
@@ -465,12 +508,28 @@ public sealed class TelegramJob(
             ? await reviews.FindDraftByReviewMessageAsync(replyTo, ct)
             : null;
         var pendingDraftId = await reviews.GetPendingConversationAsync(text.ChatId, text.UserId, ct);
+        var pendingTagsDraftId = await reviews.GetPendingTagsConversationAsync(text.ChatId, text.UserId, ct);
         var command = ReviewUpdateRouter.RouteText(
-            text, allowedUsers, options.ReviewChatId, pendingDraftId, draftIdFromReply);
+            text, allowedUsers, options.ReviewChatId, pendingDraftId, draftIdFromReply, pendingTagsDraftId);
         switch (command)
         {
             case SubmitChangeInstructions submit:
                 await SubmitChangeInstructionsAsync(text, submit, pendingDraftId, ct);
+                break;
+
+            case SetDraftTags setTags:
+                await reviews.ClearPendingConversationAsync(text.ChatId, text.UserId, ct);
+                await drafts.SetDraftTagsAsync(setTags.DraftId, setTags.Tags, ct);
+                await SendTextAsync(text.ChatId, setTags.Tags.Count == 0
+                    ? "🏷 Таговете са изчистени."
+                    : $"🏷 Тагове: {string.Join(", ", setTags.Tags)}", ct);
+                var tagsView = await reviews.GetReviewViewAsync(setTags.DraftId, ct);
+                if (tagsView?.TelegramMessageId is { } tagsMessageId)
+                    await gateway.Value.EditManualCardAsync(
+                        text.ChatId, tagsMessageId, ReviewMessageRenderer.RenderHtml(tagsView), setTags.DraftId,
+                        ManualCardKeyboard.Resolved, await BuildScheduleLabelAsync(ct), ct);
+                logger.LogInformation("Draft {DraftId}: tags set by {User}",
+                    setTags.DraftId, text.UserName ?? text.UserId.ToString());
                 break;
 
             case ShowStatus:
@@ -576,6 +635,24 @@ public sealed class TelegramJob(
         }
         logger.LogInformation("Draft {DraftId}: changes requested by {User}",
             submit.DraftId, text.UserName ?? text.UserId.ToString());
+    }
+
+    /// <summary>Re-renders a manual-topic card in place after a category/region/🏷 action.
+    /// AwaitingCategory is picked automatically whenever Category is still empty (the very first
+    /// category tap on a fresh /post draft); otherwise <paramref name="expanded"/> chooses between
+    /// the collapsed Resolved keyboard and the picker-appended Expanded one (🏷 pressed).</summary>
+    private async Task RerenderManualCardAsync(TgCallback callback, long draftId, bool expanded, CancellationToken ct)
+    {
+        var view = await reviews.GetReviewViewAsync(draftId, ct);
+        if (view is null)
+            return;
+
+        var keyboard = string.IsNullOrWhiteSpace(view.Category)
+            ? ManualCardKeyboard.AwaitingCategory
+            : expanded ? ManualCardKeyboard.Expanded : ManualCardKeyboard.Resolved;
+        await gateway.Value.EditManualCardAsync(
+            callback.ChatId, callback.MessageId, ReviewMessageRenderer.RenderHtml(view), draftId, keyboard,
+            await BuildScheduleLabelAsync(ct), ct);
     }
 
     /// <summary>Re-renders the draft's card with a final-status suffix and drops the buttons —
