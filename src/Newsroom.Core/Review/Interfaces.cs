@@ -165,6 +165,15 @@ public interface IReviewRepository
 
     Task ClearPendingConversationAsync(long chatId, long userId, CancellationToken ct);
 
+    /// <summary>The draft id of the open 🏷 tags conversation for (chat, user), if any — a
+    /// separate slot from the ✏️ conversation above (opening either replaces the other; see
+    /// <see cref="SetPendingTagsConversationAsync"/>).</summary>
+    Task<long?> GetPendingTagsConversationAsync(long chatId, long userId, CancellationToken ct);
+
+    /// <summary>Opens (or replaces) the single pending tags conversation for (chat, user).
+    /// <see cref="ClearPendingConversationAsync"/> closes this slot too (unconditional on kind).</summary>
+    Task SetPendingTagsConversationAsync(long chatId, long userId, long draftId, CancellationToken ct);
+
     /// <summary>Persisted getUpdates offset (nw_Config 'Telegram:UpdateOffset'; 0 when unset).</summary>
     Task<long> GetUpdateOffsetAsync(CancellationToken ct);
 

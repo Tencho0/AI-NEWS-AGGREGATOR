@@ -28,6 +28,7 @@ public sealed class ReviewRepository(
 {
     private const string UpdateOffsetKey = "Telegram:UpdateOffset";
     private const string ChangeInstructionsKind = "ChangeInstructions";
+    private const string TagsKind = "Tags";
     private const string EditorUploadAttribution = "редакторска снимка";
     /// <summary>Mirrors HeartbeatService.ConfigKey (the Worker project is not referenced here).</summary>
     private const string HeartbeatKey = "Worker:LastHeartbeatUtc";
@@ -512,6 +513,32 @@ public sealed class ReviewRepository(
             DELETE FROM dbo.nw_TelegramPending WHERE ChatId = @chatId AND UserId = @userId
             """,
             new { chatId, userId });
+    }
+
+    public async Task<long?> GetPendingTagsConversationAsync(long chatId, long userId, CancellationToken ct)
+    {
+        using var connection = await db.OpenAsync(ct);
+        return await connection.ExecuteScalarAsync<long?>(
+            """
+            SELECT DraftId FROM dbo.nw_TelegramPending
+            WHERE ChatId = @chatId AND UserId = @userId AND Kind = @kind
+            """,
+            new { chatId, userId, kind = TagsKind });
+    }
+
+    public async Task SetPendingTagsConversationAsync(
+        long chatId, long userId, long draftId, CancellationToken ct)
+    {
+        using var connection = await db.OpenAsync(ct);
+        // Same single-slot-per-(chat,user) behavior as SetPendingConversationAsync: opening this
+        // replaces any open ✏️ conversation, and vice versa.
+        await connection.ExecuteAsync(
+            """
+            DELETE FROM dbo.nw_TelegramPending WHERE ChatId = @chatId AND UserId = @userId;
+            INSERT INTO dbo.nw_TelegramPending (ChatId, UserId, DraftId, Kind)
+            VALUES (@chatId, @userId, @draftId, @kind);
+            """,
+            new { chatId, userId, draftId, kind = TagsKind });
     }
 
     public async Task<long> GetUpdateOffsetAsync(CancellationToken ct)
