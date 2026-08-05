@@ -28,20 +28,13 @@ public sealed class WatchdogJob(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var checkInterval = TimeSpan.FromSeconds(configuration.GetValue("Watchdog:CheckSeconds", 300));
-        using var timer = new PeriodicTimer(checkInterval);
 
-        try
-        {
-            do
-            {
-                await RunCycleAsync(stoppingToken);
-            }
-            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
-        }
-        catch (OperationCanceledException)
-        {
-            // graceful shutdown
-        }
+        // The watchdog reporting on dead jobs must be the last thing to die itself.
+        await JobCycle.RunAsync(
+            checkInterval,
+            RunCycleAsync,
+            ex => logger.LogError(ex, "Watchdog cycle failed; retrying on the next tick"),
+            stoppingToken);
     }
 
     private async Task RunCycleAsync(CancellationToken ct)

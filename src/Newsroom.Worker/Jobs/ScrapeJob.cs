@@ -20,21 +20,16 @@ public sealed class ScrapeJob(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var checkInterval = TimeSpan.FromSeconds(configuration.GetValue("Scrape:CheckSeconds", 60));
-        using var timer = new PeriodicTimer(checkInterval);
 
-        try
-        {
-            do
+        await JobCycle.RunAsync(
+            checkInterval,
+            async ct =>
             {
-                await RunCycleAsync(stoppingToken);
-                await heartbeat.BeatAsync(JobNames.Scrape, stoppingToken);
-            }
-            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
-        }
-        catch (OperationCanceledException)
-        {
-            // graceful shutdown
-        }
+                await RunCycleAsync(ct);
+                await heartbeat.BeatAsync(JobNames.Scrape, ct);
+            },
+            ex => logger.LogError(ex, "Scrape cycle failed; retrying on the next tick"),
+            stoppingToken);
     }
 
     private async Task RunCycleAsync(CancellationToken ct)

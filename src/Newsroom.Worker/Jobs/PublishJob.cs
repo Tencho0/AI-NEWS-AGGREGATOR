@@ -85,20 +85,15 @@ public sealed class PublishJob(
             logger.LogWarning(
                 "Facebook publishing runs in dry-run mode (Facebook:DryRun) — posts are logged, not sent");
 
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(options.CheckSeconds));
-        try
-        {
-            do
+        await JobCycle.RunAsync(
+            TimeSpan.FromSeconds(options.CheckSeconds),
+            async ct =>
             {
-                await RunCycleAsync(stoppingToken);
-                await heartbeat.BeatAsync(JobNames.Publish, stoppingToken);
-            }
-            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
-        }
-        catch (OperationCanceledException)
-        {
-            // graceful shutdown
-        }
+                await RunCycleAsync(ct);
+                await heartbeat.BeatAsync(JobNames.Publish, ct);
+            },
+            ex => logger.LogError(ex, "Publish cycle failed; retrying on the next tick"),
+            stoppingToken);
     }
 
     private async Task RunCycleAsync(CancellationToken ct)

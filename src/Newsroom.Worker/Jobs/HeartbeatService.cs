@@ -1,4 +1,5 @@
 using Dapper;
+using Newsroom.Core.Operations;
 using Newsroom.Infrastructure.Database;
 
 namespace Newsroom.Worker.Jobs;
@@ -17,20 +18,12 @@ public sealed class HeartbeatService(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var interval = TimeSpan.FromSeconds(configuration.GetValue("Worker:HeartbeatSeconds", 60));
-        using var timer = new PeriodicTimer(interval);
 
-        try
-        {
-            do
-            {
-                await BeatAsync(interval, stoppingToken);
-            }
-            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
-        }
-        catch (OperationCanceledException)
-        {
-            // graceful shutdown
-        }
+        await JobCycle.RunAsync(
+            interval,
+            ct => BeatAsync(interval, ct),
+            ex => logger.LogError(ex, "Heartbeat cycle failed; retrying on the next tick"),
+            stoppingToken);
     }
 
     private async Task BeatAsync(TimeSpan interval, CancellationToken ct)

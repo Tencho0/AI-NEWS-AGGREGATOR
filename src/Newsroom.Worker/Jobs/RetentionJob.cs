@@ -26,20 +26,11 @@ public sealed class RetentionJob(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using var timer = new PeriodicTimer(CheckInterval);
-
-        try
-        {
-            do
-            {
-                await RunCycleAsync(stoppingToken);
-            }
-            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
-        }
-        catch (OperationCanceledException)
-        {
-            // graceful shutdown
-        }
+        await JobCycle.RunAsync(
+            CheckInterval,
+            RunCycleAsync,
+            ex => logger.LogError(ex, "Retention cycle failed; retrying on the next tick"),
+            stoppingToken);
     }
 
     private async Task RunCycleAsync(CancellationToken ct)

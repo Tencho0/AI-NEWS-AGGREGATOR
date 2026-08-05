@@ -38,21 +38,16 @@ public sealed class DraftJob(
     {
         var checkInterval = TimeSpan.FromSeconds(
             configuration.GetValue("Ai:Stages:Draft:CheckSeconds", 300));
-        using var timer = new PeriodicTimer(checkInterval);
 
-        try
-        {
-            do
+        await JobCycle.RunAsync(
+            checkInterval,
+            async ct =>
             {
-                await RunCycleAsync(stoppingToken);
-                await heartbeat.BeatAsync(JobNames.Draft, stoppingToken);
-            }
-            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
-        }
-        catch (OperationCanceledException)
-        {
-            // graceful shutdown
-        }
+                await RunCycleAsync(ct);
+                await heartbeat.BeatAsync(JobNames.Draft, ct);
+            },
+            ex => logger.LogError(ex, "Draft cycle failed; retrying on the next tick"),
+            stoppingToken);
     }
 
     private async Task RunCycleAsync(CancellationToken ct)

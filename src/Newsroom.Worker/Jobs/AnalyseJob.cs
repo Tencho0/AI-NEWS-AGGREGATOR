@@ -26,21 +26,16 @@ public sealed class AnalyseJob(
     {
         var checkInterval = TimeSpan.FromSeconds(
             configuration.GetValue("Ai:Stages:Analyse:CheckSeconds", 120));
-        using var timer = new PeriodicTimer(checkInterval);
 
-        try
-        {
-            do
+        await JobCycle.RunAsync(
+            checkInterval,
+            async ct =>
             {
-                await RunCycleAsync(stoppingToken);
-                await heartbeat.BeatAsync(JobNames.Analyse, stoppingToken);
-            }
-            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
-        }
-        catch (OperationCanceledException)
-        {
-            // graceful shutdown
-        }
+                await RunCycleAsync(ct);
+                await heartbeat.BeatAsync(JobNames.Analyse, ct);
+            },
+            ex => logger.LogError(ex, "Analyse cycle failed; retrying on the next tick"),
+            stoppingToken);
     }
 
     private async Task RunCycleAsync(CancellationToken ct)

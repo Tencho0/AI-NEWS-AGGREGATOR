@@ -5,7 +5,11 @@
 ## Logging (Serilog)
 
 - **Sinks:** rolling files (`logs/newsroom-.log`, 14 days) for everything ≥ Debug;
-  SQL table `nw_Log` for ≥ Warning (queryable history).
+  SQL table `nw_Log` for ≥ Warning (queryable history). The rolling suffix is `yyyyMMdd`, so
+  today's file is `newsroom-20260805.log` — not `newsroom-2026-08-05.log`.
+- **Gemini call timeout:** `Ai:RequestTimeoutSeconds` (default 100). The Google SDK builds those
+  clients itself, so unlike every other outbound client they get no `AddHttpClient` timeout and no
+  Polly handler; before 2026-08-05 the value was inherited silently from `HttpClient`'s default.
 - **Structured properties everywhere:** `Job`, `SourceId`, `TopicId`, `DraftId`, `Destination`,
   `CorrelationId` (one id per pipeline item flowing through all stages).
 - **Never logged:** secrets, full article bodies (log ids + lengths), Telegram tokens in URLs.
@@ -34,6 +38,19 @@ deliberately current snapshots, not day figures.
 new ADR — deliberately out of v1.
 
 ## Error-handling policy (uniform across jobs)
+
+0. **A job may never retire itself.** Every periodic job runs through `JobCycle.RunAsync`, whose
+   one rule is that *only the host's stopping token ends the loop*. Any other failure costs the
+   current cycle, is logged, and the job takes the next tick.
+
+   This is rule zero because breaking it caused the 2026-08-04 outage. Each job used to end in a
+   bare `catch (OperationCanceledException)` commented "graceful shutdown" — but an `HttpClient`
+   timeout throws `TaskCanceledException`, which *is* an `OperationCanceledException`. One stalled
+   Gemini call therefore read as shutdown, `ExecuteAsync` returned normally, and since a completed
+   `BackgroundService` neither faults the host nor logs anything, DraftJob and TrendJob were
+   silently retired for the life of the process while every other job kept running. Draft was dead
+   21 hours before anyone noticed. When catching cancellation, always ask whether the *stopping
+   token* is cancelled — never infer shutdown from the exception type.
 
 1. **Item-level isolation:** one bad article/draft never stops a batch — catch per item, mark the
    item failed, continue.
