@@ -19,27 +19,48 @@ public static class ReviewUpdateRouter
     private const int DefaultMuteHours = 24;
 
     public static ReviewCommand RouteCallback(
-        TgCallback c, IReadOnlySet<long> allowedUsers, long reviewChatId)
+        TgCallback c, IReadOnlySet<long> allowedUsers, long reviewChatId,
+        IReadOnlyList<string> categories, IReadOnlyList<string> regions)
     {
         if (c.ChatId != reviewChatId)
             return new Ignore(ReasonWrongChat);
         if (!allowedUsers.Contains(c.UserId))
             return new Ignore(ReasonNotAllowlisted);
 
-        var separator = c.Data.IndexOf(':', StringComparison.Ordinal);
-        if (separator <= 0
-            || !long.TryParse(c.Data[(separator + 1)..], NumberStyles.None, CultureInfo.InvariantCulture, out var draftId))
+        var segments = c.Data.Split(':');
+        if (segments.Length < 2 || segments[0].Length == 0
+            || !long.TryParse(segments[1], NumberStyles.None, CultureInfo.InvariantCulture, out var draftId))
             return new Ignore(ReasonUnknownData);
 
-        return c.Data[..separator] switch
+        return (segments[0], segments.Length) switch
         {
-            "approve" => new ApproveDraft(draftId),
-            "reject" => new RejectDraft(draftId),
-            "changes" => new RequestChanges(draftId),
-            "image" => new CycleImage(draftId),
-            "schedule" => new ScheduleDraft(draftId),
+            ("approve", 2) => new ApproveDraft(draftId),
+            ("reject", 2) => new RejectDraft(draftId),
+            ("changes", 2) => new RequestChanges(draftId),
+            ("image", 2) => new CycleImage(draftId),
+            ("schedule", 2) => new ScheduleDraft(draftId),
+            ("meta", 2) => new ShowMetaPicker(draftId),
+            ("setcat", 3) when TryResolveIndex(segments[2], categories, out var category) =>
+                new SetDraftCategory(draftId, category),
+            ("setregion", 3) when TryResolveIndex(segments[2], regions, out var region) =>
+                new SetDraftRegion(draftId, region),
             _ => new Ignore(ReasonUnknownData),
         };
+    }
+
+    /// <summary>Resolves a callback's trailing index segment against a configured taxonomy list —
+    /// the only way a category/region string reaches a <see cref="ReviewCommand"/>, so an invalid
+    /// value can never be constructed through this path.</summary>
+    private static bool TryResolveIndex(string raw, IReadOnlyList<string> options, out string value)
+    {
+        if (int.TryParse(raw, NumberStyles.None, CultureInfo.InvariantCulture, out var index)
+            && index >= 0 && index < options.Count)
+        {
+            value = options[index];
+            return true;
+        }
+        value = "";
+        return false;
     }
 
     /// <summary>Photo uploads (Phase 4b). <paramref name="draftIdFromReply"/> is the draft whose
@@ -60,7 +81,7 @@ public static class ReviewUpdateRouter
 
     public static ReviewCommand RouteText(
         TgText t, IReadOnlySet<long> allowedUsers, long reviewChatId, long? pendingDraftId,
-        long? draftIdFromReply)
+        long? draftIdFromReply, long? pendingTagsDraftId = null)
     {
         if (t.ChatId != reviewChatId)
             return new Ignore(ReasonWrongChat);
@@ -70,6 +91,13 @@ public static class ReviewUpdateRouter
         var text = t.Text.Trim();
         if (text.Length == 0)
             return new Ignore(ReasonUnknownText);
+
+        // A pending 🏷 tags conversation takes priority: the editor just tapped a button that
+        // explicitly asked for tags text, so the very next plain reply is virtually certainly
+        // meant as tags — and the two conversation kinds share one table slot (opening either
+        // replaces the other), so both being non-null in practice does not happen.
+        if (pendingTagsDraftId is { } tagsDraftId && !text.StartsWith('/'))
+            return new SetDraftTags(tagsDraftId, ParseTags(text));
 
         // A reply to a specific review card binds the instructions to that card's draft —
         // unambiguous when several drafts await changes; the open ✏️ conversation is the
@@ -159,4 +187,8 @@ public static class ReviewUpdateRouter
 
     private static string NormalizeNewlines(string text) =>
         text.Replace("\r\n", "\n").Replace('\r', '\n');
+
+    /// <summary>Comma-separated tags: trimmed, empties dropped.</summary>
+    private static IReadOnlyList<string> ParseTags(string text) =>
+        text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 }

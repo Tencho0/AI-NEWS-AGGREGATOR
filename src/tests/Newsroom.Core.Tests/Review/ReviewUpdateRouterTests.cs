@@ -10,6 +10,8 @@ public class ReviewUpdateRouterTests
     private const long OtherChat = -900;
 
     private static readonly IReadOnlySet<long> Allowed = new HashSet<long> { Editor };
+    private static readonly IReadOnlyList<string> Categories = ["Общество", "Икономика / Бизнес", "Спорт"];
+    private static readonly IReadOnlyList<string> Regions = ["Благоевград", "София"];
 
     private static TgCallback Callback(string data, long userId = Editor, long chatId = ReviewChat) =>
         new(UpdateId: 1, CallbackId: "cb-1", UserId: userId, UserName: "ivan", ChatId: chatId,
@@ -25,11 +27,11 @@ public class ReviewUpdateRouterTests
             FileId: "file-abc", ReplyToMessageId: 55);
 
     private static ReviewCommand RouteCallback(TgCallback c) =>
-        ReviewUpdateRouter.RouteCallback(c, Allowed, ReviewChat);
+        ReviewUpdateRouter.RouteCallback(c, Allowed, ReviewChat, Categories, Regions);
 
     private static ReviewCommand RouteText(
-        TgText t, long? pendingDraftId = null, long? draftIdFromReply = null) =>
-        ReviewUpdateRouter.RouteText(t, Allowed, ReviewChat, pendingDraftId, draftIdFromReply);
+        TgText t, long? pendingDraftId = null, long? draftIdFromReply = null, long? pendingTagsDraftId = null) =>
+        ReviewUpdateRouter.RouteText(t, Allowed, ReviewChat, pendingDraftId, draftIdFromReply, pendingTagsDraftId);
 
     private static ReviewCommand RoutePhoto(TgPhoto p, long? draftIdFromReply) =>
         ReviewUpdateRouter.RoutePhoto(p, Allowed, ReviewChat, draftIdFromReply);
@@ -335,5 +337,70 @@ public class ReviewUpdateRouterTests
     public void Post_and_new_without_text_are_ignored(string text)
     {
         Assert.Equal(new Ignore(ReviewUpdateRouter.ReasonBadArguments), RouteText(Text(text)));
+    }
+
+    [Fact]
+    public void Setcat_and_setregion_resolve_the_configured_value_by_index()
+    {
+        Assert.Equal(new SetDraftCategory(42, "Икономика / Бизнес"), RouteCallback(Callback("setcat:42:1")));
+        Assert.Equal(new SetDraftRegion(42, "София"), RouteCallback(Callback("setregion:42:1")));
+    }
+
+    [Fact]
+    public void Meta_callback_routes_to_ShowMetaPicker()
+    {
+        Assert.Equal(new ShowMetaPicker(42), RouteCallback(Callback("meta:42")));
+    }
+
+    [Theory]
+    [InlineData("setcat:42:99")]   // out of range (only 3 configured categories)
+    [InlineData("setcat:42:-1")]   // negative
+    [InlineData("setcat:42:abc")]  // non-numeric index
+    [InlineData("setcat:42")]      // missing index segment
+    [InlineData("setregion:42:99")]
+    public void Setcat_and_setregion_with_a_bad_index_are_ignored(string data)
+    {
+        Assert.Equal(new Ignore(ReviewUpdateRouter.ReasonUnknownData), RouteCallback(Callback(data)));
+    }
+
+    [Fact]
+    public void Setcat_and_setregion_are_gated_like_every_other_callback()
+    {
+        Assert.Equal(new Ignore(ReviewUpdateRouter.ReasonNotAllowlisted),
+            RouteCallback(Callback("setcat:42:0", userId: Stranger)));
+        Assert.Equal(new Ignore(ReviewUpdateRouter.ReasonWrongChat),
+            RouteCallback(Callback("setcat:42:0", chatId: OtherChat)));
+    }
+
+    [Fact]
+    public void Pending_tags_reply_becomes_SetDraftTags()
+    {
+        Assert.Equal(
+            new SetDraftTags(42, ["труд", "криза"]),
+            RouteText(Text("труд, криза"), pendingTagsDraftId: 42));
+    }
+
+    [Fact]
+    public void Tags_reply_trims_entries_and_drops_empty_ones()
+    {
+        Assert.Equal(
+            new SetDraftTags(42, ["труд", "криза"]),
+            RouteText(Text(" труд ,, криза ,  "), pendingTagsDraftId: 42));
+    }
+
+    [Fact]
+    public void Command_during_pending_tags_conversation_still_routes_as_command()
+    {
+        Assert.Equal(new ShowStatus(), RouteText(Text("/status"), pendingTagsDraftId: 42));
+    }
+
+    [Fact]
+    public void Pending_tags_takes_priority_over_a_pending_changes_conversation()
+    {
+        // The two slots share one table row (opening either replaces the other), so in practice
+        // this never actually happens with both non-null — this pins the intended precedence.
+        Assert.Equal(
+            new SetDraftTags(42, ["тагове"]),
+            RouteText(Text("тагове"), pendingDraftId: 7, pendingTagsDraftId: 42));
     }
 }

@@ -58,6 +58,33 @@ public sealed record CreateArticle(string Headline, string Body) : ReviewCommand
 /// (Manual topic + ForceDraft pickup — docs/05-integrations/telegram.md).</summary>
 public sealed record CreateAiArticle(string Text) : ReviewCommand;
 
+/// <summary>🏷 tap or a category button on an AwaitingCategory card: sets Category on a manual
+/// (/post) draft with no AI involved. Category is never null here — it always comes from
+/// resolving a button index against the configured taxonomy list (docs/superpowers/specs/
+/// 2026-08-05-post-command-metadata-picker-design.md).</summary>
+public sealed record SetDraftCategory(long DraftId, string Category) : ReviewCommand;
+
+/// <summary>A region button tap: sets Region on a manual draft, same no-AI path as
+/// <see cref="SetDraftCategory"/>.</summary>
+public sealed record SetDraftRegion(long DraftId, string Region) : ReviewCommand;
+
+/// <summary>A text reply while the 🏷 tags conversation is open: comma-separated tags, no AI.
+/// Equals/GetHashCode are overridden for structural equality on <see cref="Tags"/> — compiler-
+/// synthesized record equality compares list-typed properties by reference, which would make two
+/// functionally identical commands compare unequal (same gotcha documented on
+/// <c>CoverTextPlan.Normalized</c>).</summary>
+public sealed record SetDraftTags(long DraftId, IReadOnlyList<string> Tags) : ReviewCommand
+{
+    public bool Equals(SetDraftTags? other) =>
+        other is not null && DraftId == other.DraftId && Tags.SequenceEqual(other.Tags, StringComparer.Ordinal);
+
+    public override int GetHashCode() => HashCode.Combine(DraftId, Tags.Count);
+}
+
+/// <summary>🏷 pressed: re-render the card with category + region picker rows appended
+/// (docs/05-integrations/telegram.md).</summary>
+public sealed record ShowMetaPicker(long DraftId) : ReviewCommand;
+
 /// <summary>Do nothing. <paramref name="Reason"/> is one of the <see cref="ReviewUpdateRouter"/>
 /// reason constants; only <see cref="ReviewUpdateRouter.ReasonNotAllowlisted"/> callbacks get a
 /// "no rights" toast, everything else is silent (docs/05: unknown chats/users are ignored).</summary>
