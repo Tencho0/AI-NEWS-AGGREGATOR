@@ -85,14 +85,21 @@ public sealed class TelegramJob(
                     offset = await PollAsync(options, allowedUsers, offset.Value, stoppingToken);
                     await heartbeat.BeatAsync(JobNames.Telegram, stoppingToken);
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
+                    throw; // genuine shutdown — end the loop through the handler below
+                }
+                catch (Exception ex)
+                {
+                    // Long polling makes an HTTP timeout routine here, and it arrives as
+                    // TaskCanceledException — an OperationCanceledException. Catching it as
+                    // shutdown would silently retire the review surface (see JobCycle).
                     logger.LogError(ex, "Telegram review cycle failed");
                     await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
                 }
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
             // graceful shutdown
         }

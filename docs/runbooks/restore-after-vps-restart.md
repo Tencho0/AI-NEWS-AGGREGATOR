@@ -26,7 +26,10 @@ and the newest worker log (below). Common causes: SQL Server service not running
 
 ## 2. Worker health
 
-- **Logs:** newest file under `C:\apps\newsroom\logs\newsroom-<date>.log`. A clean start shows
+- **Logs:** newest file under `C:\apps\newsroom\logs\`. Serilog's daily suffix is `yyyyMMdd`
+  (`newsroom-20260805.log`, *not* `newsroom-2026-08-05.log`) — list the directory rather than
+  guessing the name, and note that Windows reports a stale size and mtime for the file currently
+  open for writing. A clean start shows
   the Serilog banner, `Database schema is up to date at version N` and `Heartbeat OK` within
   ~1 minute. Warnings+ also land in the `nw_Log` table:
 

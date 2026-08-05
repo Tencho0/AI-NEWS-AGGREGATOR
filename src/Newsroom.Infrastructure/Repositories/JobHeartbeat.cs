@@ -34,7 +34,12 @@ public sealed class JobHeartbeat(IDbConnectionFactory db, ILogger<JobHeartbeat> 
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogDebug(ex, "Heartbeat for job {Job} failed", jobName);
+            // Warning, not Debug: the minimum level is Information, so a failed beat used to
+            // leave no trace at all while the watchdog reported the job as dead. That combination
+            // is indistinguishable from a genuinely stopped job — exactly the ambiguity the
+            // 2026-08-04 outage had to be untangled from. Still swallowed: the watchdog keys on
+            // the absence of fresh beats, so failing loudly here would break the cycle it reports.
+            logger.LogWarning(ex, "Heartbeat for job {Job} failed", jobName);
         }
     }
 }

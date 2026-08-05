@@ -3,6 +3,10 @@ using Google.GenAI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 
+// Aliased rather than importing Google.GenAI.Types wholesale: that namespace has its own
+// Environment type, which collides with System.Environment in ResolveApiKey below.
+using HttpOptions = Google.GenAI.Types.HttpOptions;
+
 namespace Newsroom.Infrastructure.Ai;
 
 /// <summary>
@@ -13,13 +17,37 @@ namespace Newsroom.Infrastructure.Ai;
 /// </summary>
 public static class GeminiChatClientFactory
 {
+    /// <summary>
+    /// How long a Gemini request may stall before it is abandoned, in seconds
+    /// (<c>Ai:RequestTimeoutSeconds</c>).
+    ///
+    /// <para>Unlike every other outbound client in the worker, these are built by the Google SDK
+    /// rather than through <c>AddHttpClient</c>, so until now nothing here set a timeout and the
+    /// SDK fell back to <see cref="HttpClient"/>'s default of 100 seconds. The default below
+    /// keeps that behaviour byte-for-byte — it is stated rather than inherited, and it is now
+    /// tunable. Lower it if stalled calls become common; a stalled cycle costs one interval and
+    /// is retried (see <c>JobCycle</c>).</para>
+    /// </summary>
+    public const int DefaultRequestTimeoutSeconds = 100;
+
     public static bool HasApiKey(IConfiguration configuration) =>
         !string.IsNullOrWhiteSpace(ResolveApiKey(configuration));
 
     public static IChatClient Create(IConfiguration configuration, string stage = "Analyse")
     {
         var model = configuration.GetValue($"Ai:Stages:{stage}:Model", "gemini-2.5-flash")!;
-        return new Client(apiKey: ResolveApiKey(configuration)).AsIChatClient(model);
+        return new Client(apiKey: ResolveApiKey(configuration), httpOptions: HttpOptionsFor(configuration))
+            .AsIChatClient(model);
+    }
+
+    /// <summary>The SDK reads <see cref="HttpOptions.Timeout"/> as milliseconds and applies it as
+    /// the underlying <see cref="HttpClient"/>'s timeout. A non-positive configured value means
+    /// "no timeout": the SDK is left to its own default rather than being handed a nonsense one.</summary>
+    internal static HttpOptions? HttpOptionsFor(IConfiguration configuration)
+    {
+        var seconds = configuration.GetValue(
+            "Ai:RequestTimeoutSeconds", DefaultRequestTimeoutSeconds);
+        return seconds > 0 ? new HttpOptions { Timeout = seconds * 1000 } : null;
     }
 
     /// <summary>The Cluster/Draft/SelfCheck client, wrapped with the daily-quota fallback to

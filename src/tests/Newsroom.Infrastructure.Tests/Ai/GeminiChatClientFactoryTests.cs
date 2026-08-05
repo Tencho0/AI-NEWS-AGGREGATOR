@@ -58,4 +58,34 @@ public class GeminiChatClientFactoryTests
         values["Ai:Stages:Cluster:Model"] = "gemini-3.1-flash-lite";
         Assert.False(GeminiChatClientFactory.ShouldUseFallback(Config(values), "Cluster"));
     }
+
+    // The Gemini clients are built by the Google SDK rather than AddHttpClient, so their timeout
+    // is the one the worker states here — it is not covered by any Polly handler.
+
+    [Fact]
+    public void Request_timeout_defaults_to_the_inherited_hundred_seconds_in_milliseconds()
+    {
+        var options = GeminiChatClientFactory.HttpOptionsFor(Config(CurrentShape()));
+        Assert.Equal(GeminiChatClientFactory.DefaultRequestTimeoutSeconds * 1000, options?.Timeout);
+    }
+
+    [Fact]
+    public void Request_timeout_is_configurable_in_seconds()
+    {
+        var values = CurrentShape();
+        values["Ai:RequestTimeoutSeconds"] = "45";
+        Assert.Equal(45_000, GeminiChatClientFactory.HttpOptionsFor(Config(values))?.Timeout);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-1")]
+    public void Non_positive_timeout_leaves_the_sdk_default_alone(string configured)
+    {
+        // Handing the SDK Timeout = 0 would cancel every request instantly; opting out has to
+        // mean "don't set one".
+        var values = CurrentShape();
+        values["Ai:RequestTimeoutSeconds"] = configured;
+        Assert.Null(GeminiChatClientFactory.HttpOptionsFor(Config(values)));
+    }
 }
