@@ -75,76 +75,148 @@ split the remainder on `:` again into `draftId` and `index`; existing prefixes (
 ```
 setcat:{draftId}:{categoryIndex}   → SetDraftCategory(draftId, Categories[categoryIndex])
 setregion:{draftId}:{regionIndex}  → SetDraftRegion(draftId, Regions[regionIndex])
-setregion:{draftId}:skip           → SetDraftRegion(draftId, null)
+meta:{draftId}                     → ShowMetaPicker(draftId)   -- fits the EXISTING 2-part parsing
 ```
 
-`categoryIndex`/`regionIndex` are positions into the router's injected `Ai:Categories`/`Ai:Regions`
-lists (already available where `TelegramGateway` builds cards) — never free text, so there is no
-way to construct an invalid value through this path. `Telegram.Bot`'s `callback_data` is capped at
-64 bytes; `setregion:{long}:{int}` comfortably fits.
+`categoryIndex`/`regionIndex` are positions into the same `Ai:Categories`/`Ai:Regions` lists
+`GeminiDraftingOptions` already binds — never free text, so there is no way to construct an invalid
+value through this path. Region has no "skip" callback: region is genuinely optional, and simply
+never tapping a region button leaves it `null`, which Umbraco already accepts — no extra sentinel
+needed. `Telegram.Bot`'s `callback_data` is capped at 64 bytes; `setregion:{long}:{int}` comfortably
+fits.
 
 ### New `ReviewCommand` records (`ReviewCommand.cs`)
 
 ```csharp
 public sealed record SetDraftCategory(long DraftId, string Category) : ReviewCommand;
-public sealed record SetDraftRegion(long DraftId, string? Region) : ReviewCommand;
+public sealed record SetDraftRegion(long DraftId, string Region) : ReviewCommand;
 public sealed record SetDraftTags(long DraftId, IReadOnlyList<string> Tags) : ReviewCommand;
+/// <summary>🏷 pressed: re-render the card with category+region picker rows appended.</summary>
+public sealed record ShowMetaPicker(long DraftId) : ReviewCommand;
 ```
 
-### Tags — text reply, new pending-conversation kind
+### Tags — text reply, a second slot in the existing pending-conversation table
 
-Reuses the existing "reply binds to a draft" mechanism (`RouteText`'s `draftIdFromReply ??
-pendingDraftId` check, `ReviewUpdateRouter.cs:77-78`) but must **not** collide with the ✏️
-AI-conversation state — a tags reply must never be swallowed as `SubmitChangeInstructions` and
-sent to the AI. `RouteText` gains a `pendingTagsDraftId` parameter (mirrors `pendingDraftId`,
-tracked separately by `TelegramJob`); when set and the reply isn't a `/command`, it routes to
-`SetDraftTags(draftId, ParseTags(text))` instead. A "🏷 Пропусни" inline button
-(`skiptags:{draftId}`) lets the editor finish without typing anything.
-
-### Repository — `DraftRepository`
-
-New method, the piece that doesn't exist today (the only current writers of Category/Region/
-TagsJson are `SaveDraftAsync` — new AI draft — and `CompleteRegenerationAsync` — full AI rewrite):
+`nw_TelegramPending` already carries a `Kind` discriminator (`ReviewRepository.cs:30`,
+`ChangeInstructionsKind = "ChangeInstructions"`) even though today only one kind is ever written —
+`SetPendingConversationAsync` unconditionally `DELETE`s the (chat, user) row before inserting, so
+at most one pending conversation exists per (chat, user) regardless of kind. This is the existing
+extension point: add a second kind (`TagsKind = "Tags"`) via two new, deliberately separate
+`IReviewRepository` methods (not a generalized `kind` parameter on the existing ones — smaller diff,
+zero risk to the already-working ✏️ flow):
 
 ```csharp
-Task UpdateManualMetadataAsync(
-    long draftId, string? category, string? region, IReadOnlyList<string>? tags, CancellationToken ct);
+Task<long?> GetPendingTagsConversationAsync(long chatId, long userId, CancellationToken ct);
+Task SetPendingTagsConversationAsync(long chatId, long userId, long draftId, CancellationToken ct);
 ```
 
-A narrow `UPDATE dbo.nw_Draft SET Category = @category, Region = @region, TagsJson = @tags WHERE
-Id = @draftId` — never touches `Headline`/`BodyMarkdown`/`Version`/`PromptVersion`/`Model`.
+Opening either kind silently replaces the other (same behavior the ✏️ flow already has for a second
+✏️ press) — acceptable, since an editor mid-🏷-tags-flow is not simultaneously mid-✏️-flow in
+practice. The existing `ClearPendingConversationAsync` (unconditional on `Kind`) closes either slot,
+so no new clear method is needed. `RouteText` gains a `pendingTagsDraftId` parameter, checked
+**before** the existing change-instructions check:
 
-**Retry semantics**, inside the same method/transaction: read the draft's current `Status` first.
+```csharp
+if (pendingTagsDraftId is { } tagsDraftId && !text.StartsWith('/'))
+    return new SetDraftTags(tagsDraftId, ParseTags(text));
+if ((draftIdFromReply ?? pendingDraftId) is { } draftId && !text.StartsWith('/'))
+    return new SubmitChangeInstructions(draftId, text);
+```
 
-- `PendingReview` → just update the columns; card re-render now shows ✅.
-- `PublishFailed` → update the columns, **and**:
-  1. `UPDATE dbo.nw_PublishRecord SET Attempts = 0 WHERE DraftId = @draftId AND Destination =
-     'umbraco'` (clears the burned attempt weight `HandleUmbracoFailureAsync` wrote).
-  2. `UPDATE dbo.nw_Draft SET Status = 'Approved' WHERE Id = @draftId` (so the next `PublishJob`
-     cycle picks it up — mirrors `tools/2026-08-04-repair-stale-taxonomy.sql` steps 3–4, done
-     in-app instead of by hand).
-- Any other status (`Approved`, `Published`, `Rejected`, `Generating`) → update the columns only;
-  a category fix after `Published` has no publish-side effect (Umbraco's endpoint is create-only
-  and won't be re-called), so the 🏷 button on an already-published card is cosmetic-only for that
-  case — acceptable, since the common case this whole feature targets is fixing metadata **before**
-  the first successful publish.
+`ParseTags`: split on `,`, trim each, drop empties — a pure helper next to `RoutePost`. No "skip"
+affordance needed: not replying leaves tags exactly as they were (empty on a fresh draft).
 
-### Card rendering — `ReviewMessageRenderer` / `TelegramGateway`
+### Repository — `DraftRepository`: three narrow setters, not one combined update
 
-- `ReviewMessageRenderer.RenderHtml`: when `IsManual && string.IsNullOrEmpty(Category)`, render
-  `⚠️ Няма зададена категория` instead of omitting the metadata line
-  (current gap: `ReviewMessageRenderer.cs:47-55` renders nothing when all three fields are empty,
-  giving the editor no visual cue).
-- `TelegramGateway`'s keyboard builder (`TelegramGateway.cs:81-94`):
-  - `IsManual && Category is null` → rows of category buttons (one per configured category,
-    2-per-row), then (after category is picked and the card re-renders) region buttons + "🏷
-    Пропусни" for region, **no** ✅ row yet. ✏️ Промени and ❌ Откажи stay available throughout —
-    an editor can still discard a bad `/post` or fall back to AI without being blocked.
-  - `IsManual && Category is not null` → today's `✅ / ✏️ / ❌` row, **plus** a new
-    `🏷 Категория/Регион` button (`meta:{draftId}`) that redisplays the category/region picker rows
-    on demand, for correcting an already-set value later. Unlike the first-time flow, ✅ stays
-    visible while correcting — the draft already has a valid category, so nothing is blocked
-    mid-edit; picking a new category simply overwrites it in place.
+Category, region and tags are set independently, at different times (a category tap; later,
+optionally, a region tap; separately, an optional tags reply). A single combined
+`UpdateManualMetadataAsync(category, region, tags)` — the original draft of this spec — would force
+every call site to pass all three, and an isolated category tap would silently null out a
+previously-set region. Three single-column setters avoid that class of bug entirely:
+
+```csharp
+Task SetDraftCategoryAsync(long draftId, string category, CancellationToken ct);
+Task SetDraftRegionAsync(long draftId, string region, CancellationToken ct);
+Task SetDraftTagsAsync(long draftId, IReadOnlyList<string> tags, CancellationToken ct);
+```
+
+Each runs a narrow `UPDATE dbo.nw_Draft SET <OneColumn> = @value WHERE Id = @draftId` — never
+touches `Headline`/`BodyMarkdown`/`Version`/`PromptVersion`/`Model` — followed by the **same shared
+retry step**, in the same transaction (a private `ReopenIfPublishFailedAsync(connection,
+transaction, draftId, ct)` helper all three call): read the draft's current `Status`; if
+`PublishFailed`, (1) `UPDATE dbo.nw_PublishRecord SET Attempts = 0 WHERE DraftId = @draftId AND
+Destination = 'umbraco' AND Status = 'Failed'` (clears the attempt weight
+`PublishRepository.RecordFailureAsync` wrote — mirrors `tools/2026-08-04-repair-stale-taxonomy.sql`
+step 3, which zeroes `Attempts` rather than deleting the row so the error history survives), then
+(2) `UPDATE dbo.nw_Draft SET Status = 'Approved' WHERE Id = @draftId` (mirrors step 4) so the next
+`PublishJob` cycle retries. Any other status (`PendingReview`, `Approved`, `Published`, `Rejected`,
+`Generating`) leaves `Status` untouched — the helper is a no-op past the column update. Tags can
+never be the reason a publish was rejected (Umbraco doesn't require them), so running the same
+reopen step after `SetDraftTagsAsync` is harmless idempotence, not a real recovery path — kept only
+for consistency across the three setters rather than special-casing tags out.
+
+### Card rendering — new `ManualCardKeyboard` enum + two new gateway methods
+
+`TelegramGateway.SendHtmlAsync`/`EditHtmlAsync` are called from **8 files**
+(`TelegramJob`, `PublishJob`, `DailyDigestJob`, `WatchdogJob`, `FacebookTestPostService`,
+`TelegramOperatorAlerts`, `SandboxTelegramGateway`, and their tests) for plain confirmations and
+non-manual review cards alike. Extending their signatures to carry manual-picker state would ripple
+through call sites that have nothing to do with `/post` metadata. Instead, two **new**,
+manual-card-only methods on `ITelegramGateway` leave the existing ones untouched:
+
+```csharp
+// Newsroom.Core.Review — visible to both TelegramJob (Worker) and the gateway (Infrastructure).
+public enum ManualCardKeyboard
+{
+    /// <summary>Category is null: category-picker buttons + ✏️/❌ only — no ✅/📅.</summary>
+    AwaitingCategory,
+    /// <summary>Category is set: the normal ✅/✏️/❌(/📅) row plus a single 🏷 correction button.</summary>
+    Resolved,
+    /// <summary>🏷 pressed: Resolved's buttons kept, category + region picker rows appended.</summary>
+    Expanded,
+}
+```
+
+```csharp
+Task<long> SendManualCardAsync(
+    long chatId, string html, long draftId, ManualCardKeyboard keyboard,
+    string? scheduleButtonLabel, CancellationToken ct);
+Task EditManualCardAsync(
+    long chatId, long messageId, string html, long draftId, ManualCardKeyboard keyboard,
+    string? scheduleButtonLabel, CancellationToken ct);
+```
+
+`TelegramGateway`'s constructor gains `IReadOnlyList<string> categories, IReadOnlyList<string>
+regions` (bound once at DI registration from `GeminiDraftingOptions.From(configuration)` —
+`Program.cs` already has `builder.Configuration` in scope where the gateway is registered) so it can
+build category/region button rows with the exact labels and indices the router resolves back. Row
+layout: 2 buttons per row for both lists. `scheduleButtonLabel` behaves as in `SendHtmlAsync` for
+`Resolved`/`Expanded` (ignored for `AwaitingCategory`, matching "block Approve — and by extension
+the 📅 shortcut to it — until Category is set"). `SandboxTelegramGateway` gets straight
+passthrough-plus-marking implementations of both, mirroring its existing methods, with matching
+`RecordingGateway` additions in `SandboxTelegramGatewayTests`.
+
+`ReviewMessageRenderer.RenderHtml`: when `IsManual && string.IsNullOrEmpty(Category)`, render
+`⚠️ Няма зададена категория` instead of omitting the metadata line entirely (current gap:
+`ReviewMessageRenderer.cs:47-55` renders nothing when all three fields are empty, giving the editor
+no visual cue).
+
+`TelegramJob.DispatchPendingAsync` picks the keyboard per view: non-manual drafts keep calling
+`SendHtmlAsync` exactly as today; manual drafts call `SendManualCardAsync` with `AwaitingCategory`
+when `Category` is empty, `Resolved` otherwise. The three new callback handlers
+(`SetDraftCategory`/`SetDraftRegion`/`ShowMetaPicker`) all re-render via a new private
+`RerenderManualCardAsync` helper — fetch the view, render HTML, pick `Resolved` (category tap) or
+`Expanded` (🏷 tap), call `EditManualCardAsync`. `SetDraftTags` re-renders the same way after saving
+(always `Resolved` — tags are only reachable once Category is already set).
+
+**Approve guard (defense in depth):** the `AwaitingCategory` keyboard has no ✅ button, so a normal
+tap cannot approve a categoryless draft — but `callback_data` is just a string, not cryptographically
+tied to what is currently rendered, so a replayed/crafted `approve:{draftId}` could still reach
+`HandleCallbackAsync`. Before calling `reviews.TryApproveAsync` in the `ApproveDraft` case, fetch the
+view and refuse (toast "Първо избери категория", no transition) when `view.IsManual &&
+string.IsNullOrWhiteSpace(view.Category)`. One extra `GetReviewViewAsync` call per ✅ press — human-
+paced, negligible cost — matching the goal's "structurally impossible" claim rather than relying on
+UI-only enforcement.
 
 ## Config fix
 
@@ -158,19 +230,24 @@ String-only change, no behavior change where config is already present (producti
 
 ## Testing (TDD)
 
-1. **Router (pure)** — `ReviewUpdateRouterTests`: `setcat:123:2` / `setregion:123:0` /
-   `setregion:123:skip` parse correctly; malformed payloads (`setcat:abc`, out-of-range index)
-   fall back to `Ignore(ReasonUnknownData)`; existing `approve:123`-style single-id commands
-   unaffected.
-2. **Repository** — new test fixture for `UpdateManualMetadataAsync`: confirms
-   Headline/BodyMarkdown/Version/Model are untouched; confirms the `PublishFailed → Approved` +
-   `Attempts = 0` transition fires only when the pre-update status was `PublishFailed`; confirms a
-   `PendingReview` draft is left in `PendingReview`.
-3. **Renderer** — manual-topic card shows the warning line when Category is null, and the
+1. **Router (pure)** — `ReviewUpdateRouterTests`: `setcat:123:2` / `setregion:123:0` parse
+   correctly; malformed payloads (`setcat:abc`, out-of-range index) fall back to
+   `Ignore(ReasonUnknownData)`; `meta:123` routes to `ShowMetaPicker(123)`; existing
+   `approve:123`-style single-id commands unaffected; a pending-tags reply routes to `SetDraftTags`
+   ahead of the existing pending-changes check.
+2. **Repository** — build-verify only (no DB test harness, matching every other repository SQL
+   method in this codebase): `SetDraftCategoryAsync`/`SetDraftRegionAsync`/`SetDraftTagsAsync`
+   compile and match their `IDraftRepository` signatures; manual UAT covers the actual
+   `PublishFailed → Approved` transition.
+3. **Renderer** — manual-topic card shows the warning line when Category is empty, and the
    real metadata line once set.
-4. **Manual UAT** — `/post` → tap category → tap region → skip tags → ✅ → publishes; a
-   deliberately-mis-set category on a `PublishFailed` fixture draft → tap 🏷 → new category → next
-   `PublishJob` cycle succeeds without any manual SQL.
+4. **Sandbox gateway** — `SandboxTelegramGatewayTests`: `SendManualCardAsync`/`EditManualCardAsync`
+   mark the HTML and pass every argument through, matching the existing `SendHtmlAsync`/
+   `EditHtmlAsync` test pattern.
+5. **Manual UAT** — `/post` → tap category → ✅ appears → tap 🏷 → tap region → tags reply →
+   ✅ → publishes; a deliberately-mis-set category on a `PublishFailed` fixture draft → tap 🏷 →
+   new category → next `PublishJob` cycle succeeds without any manual SQL; a crafted
+   `approve:{id}` callback on a still-categoryless draft is refused with a toast.
 
 ## Docs
 
@@ -181,17 +258,29 @@ String-only change, no behavior change where config is already present (producti
 
 ## Files touched
 
-- `src/Newsroom.Core/Review/ReviewCommand.cs` (three new records)
-- `src/Newsroom.Core/Review/ReviewUpdateRouter.cs` (`RouteCallback` 3-part parsing, `RouteText`
-  tags-reply routing)
+- `src/Newsroom.Core/Review/ReviewCommand.cs` (four new records)
+- `src/Newsroom.Core/Review/ReviewUpdateRouter.cs` (`RouteCallback` 3-part parsing for
+  `setcat`/`setregion`, `meta` on the existing 2-part path, `RouteText` tags-reply routing)
 - `src/Newsroom.Core/Review/ReviewMessageRenderer.cs` (missing-category warning line)
-- `src/Newsroom.Core/Drafting/Interfaces.cs` (`UpdateManualMetadataAsync` signature)
-- `src/Newsroom.Infrastructure/Repositories/DraftRepository.cs` (`UpdateManualMetadataAsync` +
-  retry semantics)
-- `src/Newsroom.Infrastructure/Review/TelegramGateway.cs` (category/region/🏷/skip-tags keyboards)
+- `src/Newsroom.Core/Review/ManualCardKeyboard.cs` (new enum)
+- `src/Newsroom.Core/Review/Interfaces.cs` (`ITelegramGateway.SendManualCardAsync`/
+  `EditManualCardAsync`; `IReviewRepository.GetPendingTagsConversationAsync`/
+  `SetPendingTagsConversationAsync`)
+- `src/Newsroom.Core/Drafting/Interfaces.cs` (three new `IDraftRepository` setter signatures)
+- `src/Newsroom.Infrastructure/Repositories/DraftRepository.cs` (the three setters +
+  `ReopenIfPublishFailedAsync` helper)
+- `src/Newsroom.Infrastructure/Repositories/ReviewRepository.cs` (`TagsKind`, the two new
+  pending-tags methods)
+- `src/Newsroom.Infrastructure/Review/TelegramGateway.cs` (constructor gains categories/regions;
+  `SendManualCardAsync`/`EditManualCardAsync` + keyboard-row builder)
+- `src/Newsroom.Infrastructure/Review/SandboxTelegramGateway.cs` (passthrough + marking for the two
+  new methods)
 - `src/Newsroom.Infrastructure/Ai/GeminiAiOptions.cs` (`DefaultCategories` fix)
 - `src/Newsroom.Infrastructure/Ai/GeminiDraftingOptions.cs` (`DefaultRegions` fix)
-- `src/Newsroom.Worker/Jobs/TelegramJob.cs` (new command handling, `pendingTagsDraftId` state,
-  `/help` text)
-- Tests: `ReviewUpdateRouterTests`, new `DraftRepository` metadata tests, renderer tests
+- `src/Newsroom.Worker/Jobs/TelegramJob.cs` (dispatch branching, new callback/text command
+  handling, `RerenderManualCardAsync` helper, approve guard, `/help` text)
+- `src/Newsroom.Worker/Program.cs` (`TelegramGateway` construction passes
+  `GeminiDraftingOptions.Categories`/`.Regions`)
+- Tests: `ReviewUpdateRouterTests`, `SandboxTelegramGatewayTests`, renderer tests, new
+  `GeminiAiOptionsTests`/`GeminiDraftingOptionsTests`
 - Docs listed above
