@@ -19,6 +19,16 @@ public interface ITelegramGateway
         long chatId, string html, bool withReviewButtons, long? draftIdForButtons,
         string? scheduleButtonLabel, CancellationToken ct);
 
+    /// <summary>Posts a manual-topic (/post) review card with a metadata-aware keyboard
+    /// (<see cref="ManualCardKeyboard"/>) instead of the fixed ✅/✏️/❌ row — used only for drafts
+    /// whose topic is Manual. <paramref name="scheduleButtonLabel"/> behaves as in
+    /// <see cref="SendHtmlAsync"/> for Resolved/Expanded (ignored for AwaitingCategory, which has
+    /// no ✅/📅 row at all).</summary>
+    /// <returns>The Telegram message id.</returns>
+    Task<long> SendManualCardAsync(
+        long chatId, string html, long draftId, ManualCardKeyboard keyboard,
+        string? scheduleButtonLabel, CancellationToken ct);
+
     /// <summary>Edits a previously sent message; <paramref name="removeButtons"/> drops the
     /// inline keyboard (resolved drafts must not keep live buttons). When
     /// <paramref name="approveNowDraftIdForButton"/> is set, the edited message keeps a single
@@ -28,6 +38,13 @@ public interface ITelegramGateway
     Task EditHtmlAsync(
         long chatId, long messageId, string html, bool removeButtons,
         long? approveNowDraftIdForButton, CancellationToken ct);
+
+    /// <summary>Edits a manual-topic card in place with a metadata-aware keyboard — the category/
+    /// region button taps and the 🏷 correction button all re-render through this rather than
+    /// <see cref="EditHtmlAsync"/>.</summary>
+    Task EditManualCardAsync(
+        long chatId, long messageId, string html, long draftId, ManualCardKeyboard keyboard,
+        string? scheduleButtonLabel, CancellationToken ct);
 
     /// <summary>Short toast answering an inline-button press (must happen within ~10 s).</summary>
     Task AnswerCallbackAsync(string callbackId, string text, CancellationToken ct);

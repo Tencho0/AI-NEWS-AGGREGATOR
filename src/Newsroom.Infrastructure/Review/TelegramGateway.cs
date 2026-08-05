@@ -13,7 +13,8 @@ namespace Newsroom.Infrastructure.Review;
 /// translates between the wire types and the Core DTOs; everything decidable lives in
 /// <see cref="ReviewUpdateRouter"/>/<see cref="ReviewMessageRenderer"/> plus the TelegramJob.
 /// </summary>
-public sealed class TelegramGateway(string botToken) : ITelegramGateway
+public sealed class TelegramGateway(
+    string botToken, IReadOnlyList<string> categories, IReadOnlyList<string> regions) : ITelegramGateway
 {
     private static readonly LinkPreviewOptions NoPreview = new() { IsDisabled = true };
 
@@ -119,6 +120,86 @@ public sealed class TelegramGateway(string botToken) : ITelegramGateway
             replyMarkup: ApproveNowKeyboard(approveNowDraftIdForButton),
             linkPreviewOptions: NoPreview,
             cancellationToken: ct);
+    }
+
+    public async Task<long> SendManualCardAsync(
+        long chatId, string html, long draftId, ManualCardKeyboard keyboard,
+        string? scheduleButtonLabel, CancellationToken ct)
+    {
+        var message = await bot.SendMessage(
+            chatId,
+            html,
+            parseMode: ParseMode.Html,
+            replyMarkup: BuildManualKeyboard(draftId, keyboard, scheduleButtonLabel),
+            linkPreviewOptions: NoPreview,
+            cancellationToken: ct);
+        return message.MessageId;
+    }
+
+    public async Task EditManualCardAsync(
+        long chatId, long messageId, string html, long draftId, ManualCardKeyboard keyboard,
+        string? scheduleButtonLabel, CancellationToken ct)
+    {
+        await bot.EditMessageText(
+            chatId,
+            (int)messageId,
+            html,
+            parseMode: ParseMode.Html,
+            replyMarkup: BuildManualKeyboard(draftId, keyboard, scheduleButtonLabel),
+            linkPreviewOptions: NoPreview,
+            cancellationToken: ct);
+    }
+
+    /// <summary>AwaitingCategory: category-picker rows + ✏️/❌ (no ✅/📅). Resolved: the normal
+    /// ✅/✏️/❌(/📅) row plus 🏷. Expanded: Resolved's rows plus category and region picker rows
+    /// appended below.</summary>
+    private InlineKeyboardMarkup BuildManualKeyboard(
+        long draftId, ManualCardKeyboard keyboard, string? scheduleButtonLabel)
+    {
+        List<InlineKeyboardButton[]> rows = [];
+
+        if (keyboard == ManualCardKeyboard.AwaitingCategory)
+        {
+            rows.Add([
+                InlineKeyboardButton.WithCallbackData("✏️ Промени", $"changes:{draftId}"),
+                InlineKeyboardButton.WithCallbackData("❌ Откажи", $"reject:{draftId}"),
+            ]);
+        }
+        else
+        {
+            rows.Add([
+                InlineKeyboardButton.WithCallbackData("✅ Одобри", $"approve:{draftId}"),
+                InlineKeyboardButton.WithCallbackData("✏️ Промени", $"changes:{draftId}"),
+                InlineKeyboardButton.WithCallbackData("❌ Откажи", $"reject:{draftId}"),
+            ]);
+            if (scheduleButtonLabel is not null)
+                rows.Add([InlineKeyboardButton.WithCallbackData(scheduleButtonLabel, $"schedule:{draftId}")]);
+            rows.Add([InlineKeyboardButton.WithCallbackData("🏷 Категория/Регион/Тагове", $"meta:{draftId}")]);
+        }
+
+        if (keyboard is ManualCardKeyboard.AwaitingCategory or ManualCardKeyboard.Expanded)
+        {
+            rows.AddRange(PickerRows("setcat", draftId, categories));
+            if (keyboard == ManualCardKeyboard.Expanded)
+                rows.AddRange(PickerRows("setregion", draftId, regions));
+        }
+
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    /// <summary>Two buttons per row, callback_data "{prefix}:{draftId}:{index}" — index is the
+    /// option's position in <paramref name="options"/>, resolved back by
+    /// <see cref="Newsroom.Core.Review.ReviewUpdateRouter"/>.</summary>
+    private static IEnumerable<InlineKeyboardButton[]> PickerRows(
+        string prefix, long draftId, IReadOnlyList<string> options)
+    {
+        for (var i = 0; i < options.Count; i += 2)
+        {
+            List<InlineKeyboardButton> row = [InlineKeyboardButton.WithCallbackData(options[i], $"{prefix}:{draftId}:{i}")];
+            if (i + 1 < options.Count)
+                row.Add(InlineKeyboardButton.WithCallbackData(options[i + 1], $"{prefix}:{draftId}:{i + 1}"));
+            yield return row.ToArray();
+        }
     }
 
     public Task AnswerCallbackAsync(string callbackId, string text, CancellationToken ct) =>

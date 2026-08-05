@@ -32,6 +32,16 @@ public sealed class SandboxTelegramGateway(ITelegramGateway inner) : ITelegramGa
             chatId, messageId, Mark(html, HtmlMarker)!, removeButtons,
             approveNowDraftIdForButton, ct);
 
+    public Task<long> SendManualCardAsync(
+        long chatId, string html, long draftId, ManualCardKeyboard keyboard,
+        string? scheduleButtonLabel, CancellationToken ct) =>
+        inner.SendManualCardAsync(chatId, Mark(html, HtmlMarker)!, draftId, keyboard, scheduleButtonLabel, ct);
+
+    public Task EditManualCardAsync(
+        long chatId, long messageId, string html, long draftId, ManualCardKeyboard keyboard,
+        string? scheduleButtonLabel, CancellationToken ct) =>
+        inner.EditManualCardAsync(chatId, messageId, Mark(html, HtmlMarker)!, draftId, keyboard, scheduleButtonLabel, ct);
+
     public Task AnswerCallbackAsync(string callbackId, string text, CancellationToken ct) =>
         inner.AnswerCallbackAsync(callbackId, text, ct); // a toast is not a message in the chat
 

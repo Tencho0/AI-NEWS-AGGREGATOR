@@ -25,6 +25,8 @@ public class SandboxTelegramGatewayTests
         public string? PhotoReference { get; private set; }
         public int? Index { get; private set; }
         public int? Total { get; private set; }
+        public long DraftIdArg { get; private set; }
+        public ManualCardKeyboard Keyboard { get; private set; }
 
         public Task<TgUpdateBatch> GetUpdatesAsync(long offset, int timeoutSeconds, CancellationToken ct)
         {
@@ -79,6 +81,21 @@ public class SandboxTelegramGatewayTests
         {
             (FileId, Directory) = (fileId, directory);
             return Task.FromResult(@"C:\tmp\photo.jpg");
+        }
+
+        public Task<long> SendManualCardAsync(long chatId, string html, long draftId,
+            ManualCardKeyboard keyboard, string? scheduleButtonLabel, CancellationToken ct)
+        {
+            (ChatId, Html, DraftIdArg, Keyboard, ScheduleLabel) = (chatId, html, draftId, keyboard, scheduleButtonLabel);
+            return Task.FromResult(11L);
+        }
+
+        public Task EditManualCardAsync(long chatId, long messageId, string html, long draftId,
+            ManualCardKeyboard keyboard, string? scheduleButtonLabel, CancellationToken ct)
+        {
+            (ChatId, MessageId, Html, DraftIdArg, Keyboard, ScheduleLabel) =
+                (chatId, messageId, html, draftId, keyboard, scheduleButtonLabel);
+            return Task.CompletedTask;
         }
     }
 
@@ -198,5 +215,37 @@ public class SandboxTelegramGatewayTests
         Assert.Equal(@"C:\tmp\photo.jpg", path);
         Assert.Equal("file-1", inner.FileId);
         Assert.Equal(@"C:\uploads", inner.Directory);
+    }
+
+    [Fact]
+    public async Task Sent_manual_card_is_marked_and_every_argument_passes_through()
+    {
+        var (gateway, inner) = Subject();
+
+        var messageId = await gateway.SendManualCardAsync(
+            42, "<b>Заглавие</b>", 5, ManualCardKeyboard.AwaitingCategory, null, CancellationToken.None);
+
+        Assert.Equal(11L, messageId);
+        Assert.StartsWith(SandboxTelegramGateway.HtmlMarker, inner.Html);
+        Assert.Contains("<b>Заглавие</b>", inner.Html);
+        Assert.Equal(42, inner.ChatId);
+        Assert.Equal(5, inner.DraftIdArg);
+        Assert.Equal(ManualCardKeyboard.AwaitingCategory, inner.Keyboard);
+    }
+
+    [Fact]
+    public async Task Edited_manual_card_is_marked_and_every_argument_passes_through()
+    {
+        var (gateway, inner) = Subject();
+
+        await gateway.EditManualCardAsync(
+            42, 7, "📎 Категория: Спорт", 5, ManualCardKeyboard.Resolved, "📅 07:30", CancellationToken.None);
+
+        Assert.Equal(42, inner.ChatId);
+        Assert.Equal(7, inner.MessageId);
+        Assert.StartsWith(SandboxTelegramGateway.HtmlMarker, inner.Html);
+        Assert.Equal(5, inner.DraftIdArg);
+        Assert.Equal(ManualCardKeyboard.Resolved, inner.Keyboard);
+        Assert.Equal("📅 07:30", inner.ScheduleLabel);
     }
 }
