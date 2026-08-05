@@ -133,4 +133,19 @@ public interface IDraftRepository
     /// <see cref="RecordGenerationFailureAsync"/> this does NOT touch nw_Topic.DraftAttempts —
     /// a failed editor-requested rewrite must not poison the topic.</summary>
     Task FailRegenerationAsync(long draftId, string error, CancellationToken ct);
+
+    /// <summary>Sets Category on a manual (/post) draft — touches only that one column, never
+    /// Headline/BodyMarkdown/Version/PromptVersion/Model. If the draft is currently PublishFailed
+    /// (Umbraco rejected the old value), clears the burned Umbraco attempt weight and flips it
+    /// back to Approved so the next PublishJob cycle retries (docs/superpowers/specs/
+    /// 2026-08-05-post-command-metadata-picker-design.md).</summary>
+    Task SetDraftCategoryAsync(long draftId, string category, CancellationToken ct);
+
+    /// <summary>As <see cref="SetDraftCategoryAsync"/>, for Region.</summary>
+    Task SetDraftRegionAsync(long draftId, string region, CancellationToken ct);
+
+    /// <summary>As <see cref="SetDraftCategoryAsync"/>, for Tags. Tags are never themselves the
+    /// reason a publish was rejected, but this runs the same reopen check for consistency across
+    /// the three setters rather than special-casing tags out.</summary>
+    Task SetDraftTagsAsync(long draftId, IReadOnlyList<string> tags, CancellationToken ct);
 }

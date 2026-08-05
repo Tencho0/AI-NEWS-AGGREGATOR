@@ -5,6 +5,7 @@ using Dapper;
 
 using Newsroom.Core.Ai;
 using Newsroom.Core.Drafting;
+using Newsroom.Core.Publishing;
 using Newsroom.Core.Trends;
 using Newsroom.Infrastructure.Database;
 
@@ -414,6 +415,79 @@ public sealed class DraftRepository(IDbConnectionFactory db) : IDraftRepository
             WHERE Id = @draftId
             """,
             new { draftId, status = nameof(DraftStatus.GenerationFailed), error });
+    }
+
+    public async Task SetDraftCategoryAsync(long draftId, string category, CancellationToken ct)
+    {
+        using var connection = await db.OpenAsync(ct);
+        using var transaction = connection.BeginTransaction();
+
+        await connection.ExecuteAsync(
+            "UPDATE dbo.nw_Draft SET Category = @category, UpdatedAtUtc = SYSUTCDATETIME() WHERE Id = @draftId",
+            new { draftId, category = Truncate(category, 100) },
+            transaction);
+        await ReopenIfPublishFailedAsync(connection, transaction, draftId, ct);
+
+        transaction.Commit();
+    }
+
+    public async Task SetDraftRegionAsync(long draftId, string region, CancellationToken ct)
+    {
+        using var connection = await db.OpenAsync(ct);
+        using var transaction = connection.BeginTransaction();
+
+        await connection.ExecuteAsync(
+            "UPDATE dbo.nw_Draft SET Region = @region, UpdatedAtUtc = SYSUTCDATETIME() WHERE Id = @draftId",
+            new { draftId, region = Truncate(region, 100) },
+            transaction);
+        await ReopenIfPublishFailedAsync(connection, transaction, draftId, ct);
+
+        transaction.Commit();
+    }
+
+    public async Task SetDraftTagsAsync(long draftId, IReadOnlyList<string> tags, CancellationToken ct)
+    {
+        using var connection = await db.OpenAsync(ct);
+        using var transaction = connection.BeginTransaction();
+
+        await connection.ExecuteAsync(
+            "UPDATE dbo.nw_Draft SET TagsJson = @tagsJson, UpdatedAtUtc = SYSUTCDATETIME() WHERE Id = @draftId",
+            new { draftId, tagsJson = JsonSerializer.Serialize(tags, JsonOptions) },
+            transaction);
+        await ReopenIfPublishFailedAsync(connection, transaction, draftId, ct);
+
+        transaction.Commit();
+    }
+
+    /// <summary>Shared by the three metadata setters above: if the draft is PublishFailed, clear
+    /// the burned Umbraco attempt weight and flip it back to Approved so the next PublishJob cycle
+    /// retries — mirrors tools/2026-08-04-repair-stale-taxonomy.sql steps 3-4 (which zero
+    /// Attempts rather than deleting the row, so the error history survives), done in-app for the
+    /// single draft the editor just fixed rather than swept for every stale row. A no-op for any
+    /// other status.</summary>
+    private static async Task ReopenIfPublishFailedAsync(
+        System.Data.IDbConnection connection, System.Data.IDbTransaction transaction,
+        long draftId, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        var status = await connection.ExecuteScalarAsync<string?>(
+            "SELECT Status FROM dbo.nw_Draft WHERE Id = @draftId", new { draftId }, transaction);
+        if (status != nameof(DraftStatus.PublishFailed))
+            return;
+
+        await connection.ExecuteAsync(
+            """
+            UPDATE dbo.nw_PublishRecord
+            SET Attempts = 0
+            WHERE DraftId = @draftId AND Destination = @umbraco AND Status = @failedStatus
+            """,
+            new { draftId, umbraco = PublishDestinations.Umbraco, failedStatus = "Failed" },
+            transaction);
+
+        await connection.ExecuteAsync(
+            "UPDATE dbo.nw_Draft SET Status = @approvedStatus WHERE Id = @draftId",
+            new { draftId, approvedStatus = nameof(DraftStatus.Approved) },
+            transaction);
     }
 
     private static async Task InsertImagesAsync(
