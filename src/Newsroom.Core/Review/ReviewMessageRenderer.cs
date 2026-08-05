@@ -44,7 +44,14 @@ public static class ReviewMessageRenderer
         var bodyBudget = string.IsNullOrWhiteSpace(v.FacebookCaption) ? MaxBodyChars : MaxBodyCharsWithCaption;
         html.Append('\n').Append(Escape(TruncateOnWordBoundary(v.BodyMarkdown, bodyBudget))).Append('\n');
 
-        if (!string.IsNullOrWhiteSpace(v.Category) || !string.IsNullOrWhiteSpace(v.Region) || v.Tags.Count > 0)
+        if (v.IsManual && string.IsNullOrWhiteSpace(v.Category))
+        {
+            // /post drafts start with no category — Umbraco requires one to publish. The button
+            // picker (docs/superpowers/specs/2026-08-05-post-command-metadata-picker-design.md)
+            // is how an editor fills this in; this line is the visual cue that it is still missing.
+            html.Append('\n').Append("⚠️ Няма зададена категория").Append('\n');
+        }
+        else if (!string.IsNullOrWhiteSpace(v.Category) || !string.IsNullOrWhiteSpace(v.Region) || v.Tags.Count > 0)
         {
             html.Append('\n').Append("📎 Категория: ").Append(Escape(v.Category));
             if (!string.IsNullOrWhiteSpace(v.Region))

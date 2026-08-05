@@ -225,4 +225,22 @@ public class ReviewMessageRendererTests
         Assert.True(rendered.Length <= ReviewMessageRenderer.MaxBodyChars + 2);
         Assert.True(rendered.Length > ReviewMessageRenderer.MaxBodyCharsWithCaption);
     }
+
+    [Fact]
+    public void Manual_draft_without_category_shows_the_missing_category_warning()
+    {
+        var html = ReviewMessageRenderer.RenderHtml(View(isManual: true, category: "", region: null, tags: []));
+
+        Assert.Contains("⚠️ Няма зададена категория", html);
+        Assert.DoesNotContain("📎", html);
+    }
+
+    [Fact]
+    public void Manual_draft_with_category_shows_the_normal_meta_line_not_the_warning()
+    {
+        var html = ReviewMessageRenderer.RenderHtml(View(isManual: true, category: "Икономика / Бизнес"));
+
+        Assert.DoesNotContain("⚠️", html);
+        Assert.Contains("📎 Категория: Икономика / Бизнес", html);
+    }
 }
