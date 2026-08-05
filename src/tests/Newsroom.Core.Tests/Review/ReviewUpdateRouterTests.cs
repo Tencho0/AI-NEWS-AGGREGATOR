@@ -403,4 +403,13 @@ public class ReviewUpdateRouterTests
             new SetDraftTags(42, ["тагове"]),
             RouteText(Text("тагове"), pendingDraftId: 7, pendingTagsDraftId: 42));
     }
+
+    [Fact]
+    public void A_reply_bound_to_a_different_draft_beats_a_pending_tags_conversation()
+    {
+        var command = RouteText(
+            Text("Смени заглавието.", replyToMessageId: 55), pendingTagsDraftId: 42, draftIdFromReply: 7);
+
+        Assert.Equal(new SubmitChangeInstructions(7, "Смени заглавието."), command);
+    }
 }

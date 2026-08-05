@@ -320,6 +320,11 @@ public sealed class TelegramJob(
                 break;
 
             case SetDraftCategory setCategory:
+                if (await reviews.FindDraftByReviewMessageAsync(callback.MessageId, ct) != setCategory.DraftId)
+                {
+                    await AnswerBestEffortAsync(callback.CallbackId, "Вече обработено", ct);
+                    break;
+                }
                 await drafts.SetDraftCategoryAsync(setCategory.DraftId, setCategory.Category, ct);
                 await RerenderManualCardAsync(callback, setCategory.DraftId, expanded: false, ct);
                 await gateway.Value.AnswerCallbackAsync(callback.CallbackId, $"📎 {setCategory.Category}", ct);
@@ -328,6 +333,11 @@ public sealed class TelegramJob(
                 break;
 
             case SetDraftRegion setRegion:
+                if (await reviews.FindDraftByReviewMessageAsync(callback.MessageId, ct) != setRegion.DraftId)
+                {
+                    await AnswerBestEffortAsync(callback.CallbackId, "Вече обработено", ct);
+                    break;
+                }
                 await drafts.SetDraftRegionAsync(setRegion.DraftId, setRegion.Region, ct);
                 await RerenderManualCardAsync(callback, setRegion.DraftId, expanded: false, ct);
                 await gateway.Value.AnswerCallbackAsync(callback.CallbackId, $"📍 {setRegion.Region}", ct);
@@ -336,10 +346,15 @@ public sealed class TelegramJob(
                 break;
 
             case ShowMetaPicker meta:
+                if (await reviews.FindDraftByReviewMessageAsync(callback.MessageId, ct) != meta.DraftId)
+                {
+                    await AnswerBestEffortAsync(callback.CallbackId, "Вече обработено", ct);
+                    break;
+                }
                 await reviews.SetPendingTagsConversationAsync(callback.ChatId, callback.UserId, meta.DraftId, ct);
                 await RerenderManualCardAsync(callback, meta.DraftId, expanded: true, ct);
                 await gateway.Value.AnswerCallbackAsync(
-                    callback.CallbackId, "🏷 Избери по-горе или отговори тук с тагове", ct);
+                    callback.CallbackId, "🏷 Избери по-долу или отговори тук с тагове", ct);
                 break;
 
             case Ignore ignore:
@@ -518,19 +533,28 @@ public sealed class TelegramJob(
                 break;
 
             case SetDraftTags setTags:
+                // Clear unconditionally, like the ✏️ conversation does: a dead conversation must
+                // not keep swallowing the editor's next unrelated message.
                 await reviews.ClearPendingConversationAsync(text.ChatId, text.UserId, ct);
+                var tagsView = await reviews.GetReviewViewAsync(setTags.DraftId, ct);
+                if (tagsView?.TelegramMessageId is not { } tagsMessageId
+                    || await reviews.FindDraftByReviewMessageAsync(tagsMessageId, ct) != setTags.DraftId)
+                {
+                    await SendTextAsync(text.ChatId, "Вече обработено.", ct);
+                    break;
+                }
                 await drafts.SetDraftTagsAsync(setTags.DraftId, setTags.Tags, ct);
                 await SendTextAsync(text.ChatId, setTags.Tags.Count == 0
                     ? "🏷 Таговете са изчистени."
                     : $"🏷 Тагове: {string.Join(", ", setTags.Tags)}", ct);
-                var tagsView = await reviews.GetReviewViewAsync(setTags.DraftId, ct);
-                if (tagsView?.TelegramMessageId is { } tagsMessageId)
+                var updatedTagsView = await reviews.GetReviewViewAsync(setTags.DraftId, ct);
+                if (updatedTagsView is not null)
                 {
-                    var tagsKeyboard = string.IsNullOrWhiteSpace(tagsView.Category)
+                    var tagsKeyboard = string.IsNullOrWhiteSpace(updatedTagsView.Category)
                         ? ManualCardKeyboard.AwaitingCategory
                         : ManualCardKeyboard.Resolved;
                     await gateway.Value.EditManualCardAsync(
-                        text.ChatId, tagsMessageId, ReviewMessageRenderer.RenderHtml(tagsView), setTags.DraftId,
+                        text.ChatId, tagsMessageId, ReviewMessageRenderer.RenderHtml(updatedTagsView), setTags.DraftId,
                         tagsKeyboard, await BuildScheduleLabelAsync(ct), ct);
                 }
                 logger.LogInformation("Draft {DraftId}: tags set by {User}",

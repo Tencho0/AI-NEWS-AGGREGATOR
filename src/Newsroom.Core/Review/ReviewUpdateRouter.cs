@@ -92,11 +92,14 @@ public static class ReviewUpdateRouter
         if (text.Length == 0)
             return new Ignore(ReasonUnknownText);
 
-        // A pending 🏷 tags conversation takes priority: the editor just tapped a button that
-        // explicitly asked for tags text, so the very next plain reply is virtually certainly
-        // meant as tags — and the two conversation kinds share one table slot (opening either
-        // replaces the other), so both being non-null in practice does not happen.
-        if (pendingTagsDraftId is { } tagsDraftId && !text.StartsWith('/'))
+        // A pending 🏷 tags conversation takes priority over the open ✏️ conversation: the editor
+        // just tapped a button that explicitly asked for tags text, so the very next plain reply
+        // is virtually certainly meant as tags. But a reply that is explicitly bound to a
+        // DIFFERENT card still wins — see the rule right below — otherwise pointing a reply at
+        // another draft's card while a tags conversation is open would silently get captured as
+        // tags for the wrong draft instead of going where the editor pointed it.
+        if (pendingTagsDraftId is { } tagsDraftId && !text.StartsWith('/')
+            && (draftIdFromReply is null || draftIdFromReply == tagsDraftId))
             return new SetDraftTags(tagsDraftId, ParseTags(text));
 
         // A reply to a specific review card binds the instructions to that card's draft —
