@@ -525,9 +525,14 @@ public sealed class TelegramJob(
                     : $"🏷 Тагове: {string.Join(", ", setTags.Tags)}", ct);
                 var tagsView = await reviews.GetReviewViewAsync(setTags.DraftId, ct);
                 if (tagsView?.TelegramMessageId is { } tagsMessageId)
+                {
+                    var tagsKeyboard = string.IsNullOrWhiteSpace(tagsView.Category)
+                        ? ManualCardKeyboard.AwaitingCategory
+                        : ManualCardKeyboard.Resolved;
                     await gateway.Value.EditManualCardAsync(
                         text.ChatId, tagsMessageId, ReviewMessageRenderer.RenderHtml(tagsView), setTags.DraftId,
-                        ManualCardKeyboard.Resolved, await BuildScheduleLabelAsync(ct), ct);
+                        tagsKeyboard, await BuildScheduleLabelAsync(ct), ct);
+                }
                 logger.LogInformation("Draft {DraftId}: tags set by {User}",
                     setTags.DraftId, text.UserName ?? text.UserId.ToString());
                 break;
