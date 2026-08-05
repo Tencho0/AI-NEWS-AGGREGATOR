@@ -19,11 +19,11 @@ public sealed record GeminiDraftingOptions
     public decimal InputPricePerMTok { get; init; }
     public decimal OutputPricePerMTok { get; init; }
 
-    /// <summary>The municipalities of the Blagoevgrad district — the site's region taxonomy.</summary>
+    /// <summary>The site's five provinces (Predel-News TaxonomySeedSetup.cs is the source of
+    /// truth — corrected 2026-08-04, see tools/2026-08-04-repair-stale-taxonomy.sql).</summary>
     public static readonly IReadOnlyList<string> DefaultRegions =
     [
-        "Благоевград", "Петрич", "Сандански", "Гоце Делчев", "Разлог", "Банско", "Симитли",
-        "Кресна", "Струмяни", "Якоруда", "Белица", "Хаджидимово", "Гърмен", "Сатовча",
+        "Благоевград", "Кюстендил", "Перник", "София", "България",
     ];
 
     public static GeminiDraftingOptions From(IConfiguration configuration) => new()

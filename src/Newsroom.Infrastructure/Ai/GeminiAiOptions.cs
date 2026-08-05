@@ -18,8 +18,8 @@ public sealed record GeminiAiOptions
 
     public static readonly IReadOnlyList<string> DefaultCategories =
     [
-        "Общество", "Политика", "Икономика", "Криминално", "Спорт",
-        "Култура", "Здраве", "Образование", "Времето", "Друго",
+        "Общество", "Политика", "Криминално", "Икономика / Бизнес",
+        "Спорт", "Култура", "Любопитно", "Хайлайф",
     ];
 
     public static GeminiAiOptions From(IConfiguration configuration) => new()
