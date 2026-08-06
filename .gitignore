@@ -487,3 +487,7 @@ logs/
 
 # Sandbox worker publish output (tools/restart-sandbox.ps1, ADR-0014)
 .sandbox/
+
+# Subagent-driven-development scratch: per-plan ledger, task briefs, review packages.
+# Working state only — the record of what shipped is the git history.
+.superpowers/
