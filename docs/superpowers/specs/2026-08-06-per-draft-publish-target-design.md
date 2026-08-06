@@ -217,9 +217,15 @@ a draft approved as `Both` (or scheduled with 📅, which always writes `Both`) 
 page as a standalone post instead of stalling forever waiting for a site publish that will never
 run. Required destinations collapse to `[facebook]` for every draft.
 
-Only the 🌐 Само сайт button is omitted from cards while the flag is on — it is the one button that
-would promise something the process cannot do. ✅ and 📅 keep working and mean "publish everywhere
-possible", which under the flag is Facebook: the same thing they mean today.
+Each target button is offered only when the worker can actually honour it, so a card can never
+promise a destination that publishes nowhere. 🌐 Само сайт is dropped while the flag is on. 📘
+Само ФБ is dropped when Facebook is unconfigured — `PublishJob.RunCycleAsync` then skips the
+Facebook leg entirely while the Umbraco leg's target filter excludes Facebook-only drafts, so
+such a draft would sit `Approved` forever, selected by no leg and never alerted on. (That second
+gate was missed in this design's first draft and added during implementation, after Task 5's
+review traced the dead end.) With neither destination available the row is omitted rather than
+sent empty. ✅ and 📅 always remain and mean "publish everywhere possible", which under the flag
+is Facebook: the same thing they mean today.
 
 The flag is `false` in both shipped appsettings files, so this is a dormant path — but it is the
 documented lever for "the site is down / being polished, keep posting to the page" (decision-log

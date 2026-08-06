@@ -41,9 +41,17 @@ One message per draft version:
 💰 <cost> · v<version> · модел <model>
 ```
 + photo message with the top image suggestion (attribution in caption)
-+ inline keyboard: ✅ Одобри · ✏️ Промени · 🖼 Друга снимка · ❌ Откажи
-+ second keyboard row: 📅 Насрочи {HH:mm} (always present; the label degrades to a bare
-  „📅 Насрочи" when the suggested slot could not be computed)
++ inline keyboard: ✅ Одобри · ✏️ Промени · ❌ Откажи
++ target row: 🌐 Само сайт · 📘 Само ФБ — the per-draft publish target
+  (docs/superpowers/specs/2026-08-06-per-draft-publish-target-design.md). ✅ above them means
+  both destinations, the pre-existing flow. Each button appears only when the worker can
+  actually honour it: 🌐 is dropped while `Publishing:FacebookOnly` is on (the website leg is
+  skipped outright), and 📘 is dropped when Facebook is unconfigured (`PublishJob` then skips
+  the Facebook leg entirely, so a Facebook-only draft would sit `Approved` forever, selected by
+  no leg). With both unavailable the row is omitted rather than sent empty.
++ photo message keyboard: 🖼 Друга снимка
++ last keyboard row: 📅 Насрочи {HH:mm} (always present; the label degrades to a bare
+  „📅 Насрочи" when the suggested slot could not be computed). 📅 always means both destinations.
 
 Editor-authored drafts (`/post`, `/new`) render a different header: `✍️ <topic label>
 (редакторска)` instead of `🔥 … (score …, N източника)` — there is no trend score or scraped
@@ -97,7 +105,7 @@ each command's response is in [`TelegramJob`](../../src/Newsroom.Worker/Jobs/Tel
 | `/pause` | Stops **draft generation** (runtime flag `Draft:Paused` in `nw_Config`). Scraping and analysis keep running. |
 | `/resume` | Clears the pause flag — draft generation resumes on the next DraftJob cycle. |
 | `/draft <topicId>` | Force-draft a topic even if it is not Hot. |
-| `/post <заглавие и текст>` | Editor-authored **verbatim** article: first line = headline, rest = body. Creates a `Manual` topic + a `PendingReview` draft with no AI involved (zero quota); the normal review card follows — ✅ publishes exactly the sent text, a photo reply attaches an image, ✏️ regenerates **via AI** (costs one Draft request). Empty text is silently ignored. `/post` drafts start with no Category — Umbraco requires one to publish. The review card shows category buttons (no ✅ until one is tapped); after that, region buttons and a 🏷 button (re-opens the category/region pickers, plus a tags text reply) let the editor add the rest, all without any AI call. Fixing a category on an already-rejected (`PublishFailed`) draft automatically reopens it for the next publish cycle. |
+| `/post <заглавие и текст>` | Editor-authored **verbatim** article: first line = headline, rest = body. Creates a `Manual` topic + a `PendingReview` draft with no AI involved (zero quota); the normal review card follows — ✅ publishes exactly the sent text, a photo reply attaches an image, ✏️ regenerates **via AI** (costs one Draft request). Empty text is silently ignored. `/post` drafts start with no Category — Umbraco requires one to publish. The review card shows category buttons (no ✅ until one is tapped) — 📘 Само ФБ is the exception and stays tappable, because a Facebook-only post never calls Umbraco and so has no category requirement —; after that, region buttons and a 🏷 button (re-opens the category/region pickers, plus a tags text reply) let the editor add the rest, all without any AI call. Fixing a category on an already-rejected (`PublishFailed`) draft automatically reopens it for the next publish cycle. |
 | `/new <бележки>` | Editor-authored **AI** article: the text (notes, press release) becomes the source material; a `Manual` topic with `ForceDraftAtUtc` rides the normal DraftJob pipeline (style guide, validation, self-check against the editor's text, image suggestions). Costs one Draft (+ one SelfCheck) request. Generation failures are reported to the chat (the editor is waiting). Empty text is silently ignored. |
 
 In group chats the `@BotName` suffix (`/status@MyBot`) is accepted and stripped.
@@ -109,7 +117,9 @@ replies to the review card:
 
 | Action | Trigger | Effect |
 |---|---|---|
-| Approve | ✅ button | Publishes the draft; on an already-scheduled draft, clears the schedule and publishes instead. |
+| Approve (both) | ✅ button | Publishes to the website, then posts the link to the Facebook page; on an already-scheduled draft, clears the schedule and publishes instead. |
+| Approve (site only) | 🌐 Само сайт | Publishes to the website only. The draft reaches `Published` on the site publish alone — Facebook is not in its required set. |
+| Approve (Facebook only) | 📘 Само ФБ | Posts to the Facebook page only, as a standalone post (caption + image, no link) — the article never reaches the site. Available even on an `AwaitingCategory` `/post` card, since only Umbraco requires a category. Hidden entirely when Facebook is unconfigured. |
 | Schedule | 📅 button | Approves the draft gated on the suggested publish slot (recomputed at press time). |
 | Reject | ❌ button | Discards the draft. |
 | Request changes | ✏️ button, then a text reply | Opens a pending conversation; the next message becomes regeneration instructions. |
