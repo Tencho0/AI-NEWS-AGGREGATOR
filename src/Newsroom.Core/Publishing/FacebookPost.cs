@@ -13,7 +13,8 @@ public sealed record FacebookPost(
     string Headline,
     string Teaser,
     string ArticleUrl,
-    FacebookImage? Image = null)
+    FacebookImage? Image = null,
+    PublishTarget Target = PublishTarget.Both)
 {
     /// <summary>Editor-facing title for notifications/alerts: the headline when present,
     /// otherwise the caption post's hook (first line of the message text, word-truncated) —

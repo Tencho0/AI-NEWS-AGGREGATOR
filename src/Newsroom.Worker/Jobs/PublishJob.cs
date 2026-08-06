@@ -40,15 +40,6 @@ public sealed class PublishJob(
     private const int MaxPerCycle = 3;
     private static readonly TimeSpan TokenCheckInterval = TimeSpan.FromDays(1);
 
-    /// <summary>What "fully Published" means for this process: in Facebook-only mode the page
-    /// post is the only required destination (Approved → Published, no site); otherwise Facebook
-    /// joins the required set only when configured, so a site-only setup keeps today's flow.</summary>
-    private readonly string[] requiredDestinations = publishing.FacebookOnly
-        ? [PublishDestinations.Facebook]
-        : facebookOptions.IsConfigured
-            ? [PublishDestinations.Umbraco, PublishDestinations.Facebook]
-            : [PublishDestinations.Umbraco];
-
     private DateTime lastTokenCheckUtc; // MinValue → the first cycle checks immediately
     private DateTime lastTokenAlertUtc;
 
@@ -115,7 +106,8 @@ public sealed class PublishJob(
         try
         {
             articles = await publishes.GetApprovedUnpublishedAsync(
-                PublishDestinations.Umbraco, options.MaxAttempts, MaxPerCycle, ct);
+                PublishDestinations.Umbraco, PublishTargets.UmbracoLeg, options.MaxAttempts,
+                MaxPerCycle, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -150,7 +142,9 @@ public sealed class PublishJob(
         var result = await publisher.PublishAsync(article, ct);
         await publishes.RecordSuccessAsync(
             article.DraftId, PublishDestinations.Umbraco, result.ContentKey.ToString(), result.Url,
-            requiredDestinations, ct);
+            PublishTargets.RequiredDestinations(
+                article.Target, facebookOptions.IsConfigured, publishing.FacebookOnly),
+            ct);
         logger.LogInformation("🚀 Published draft {DraftId}: {Url}", article.DraftId, result.Url);
         await NotifyPublishedAsync(article, result.Url, ct);
     }
@@ -234,11 +228,20 @@ public sealed class PublishJob(
         IReadOnlyList<FacebookPost> posts;
         try
         {
-            posts = publishing.FacebookOnly
-                ? await publishes.GetApprovedForFacebookAsync(
-                    facebookOptions.MaxAttempts, MaxPerCycle, ct)
-                : await publishes.GetPendingFacebookAsync(
-                    facebookOptions.MaxAttempts, MaxPerCycle, ct);
+            // Both Facebook shapes run every cycle now; the draft's own target decides which
+            // query selects it. Link posts (site already live) come first — the normal pipeline.
+            // Under Publishing:FacebookOnly nothing ever reaches PartiallyPublished, so the link
+            // query has nothing to find and is skipped outright.
+            IReadOnlyList<FacebookPost> linkPosts = [];
+            if (!publishing.FacebookOnly)
+                linkPosts = await publishes.GetPendingFacebookAsync(
+                    PublishTargets.FacebookLinkLeg, facebookOptions.MaxAttempts, MaxPerCycle, ct);
+
+            var standalonePosts = await publishes.GetApprovedForFacebookAsync(
+                PublishTargets.FacebookStandaloneLeg(publishing.FacebookOnly),
+                facebookOptions.MaxAttempts, MaxPerCycle, ct);
+
+            posts = [.. linkPosts, .. standalonePosts];
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -274,7 +277,9 @@ public sealed class PublishJob(
         var result = await facebook.PublishAsync(post, ct);
         await publishes.RecordSuccessAsync(
             post.DraftId, PublishDestinations.Facebook, result.PostId, result.PermalinkUrl,
-            requiredDestinations, ct);
+            PublishTargets.RequiredDestinations(
+                post.Target, facebookOptions.IsConfigured, publishing.FacebookOnly),
+            ct);
         logger.LogInformation("📘 Posted draft {DraftId} to Facebook: {PostId}",
             post.DraftId, result.PostId);
         await NotifyFacebookPostedAsync(post, result, ct);

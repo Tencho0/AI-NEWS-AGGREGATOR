@@ -20,7 +20,10 @@ public sealed record ArticleToPublish(
     IReadOnlyList<string> Tags,
     string? SeoTitle,
     string? SeoDescription,
-    PublishImage? Image);
+    PublishImage? Image,
+    /// <summary>The draft's own destination set, chosen by the editor at ✅ time — PublishJob
+    /// asks PublishTargets.RequiredDestinations with it instead of a process-wide field.</summary>
+    PublishTarget Target = PublishTarget.Both);
 
 /// <summary>The draft's chosen cover image. Stock picks carry the provider URL the site
 /// fetches server-side; editor uploads carry <paramref name="LocalPath"/> instead — a worker

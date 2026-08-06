@@ -38,7 +38,8 @@ public sealed class PublishRepository(IDbConnectionFactory db, ImageStorage stor
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public async Task<IReadOnlyList<ArticleToPublish>> GetApprovedUnpublishedAsync(
-        string destination, int maxAttempts, int maxCount, CancellationToken ct)
+        string destination, IReadOnlyList<string> targets, int maxAttempts, int maxCount,
+        CancellationToken ct)
     {
         using var connection = await db.OpenAsync(ct);
         var rows = await connection.QueryAsync<PublishRow>(
@@ -49,7 +50,8 @@ public sealed class PublishRepository(IDbConnectionFactory db, ImageStorage stor
                    d.Region, d.TagsJson, d.SeoTitle, d.SeoDescription,
                    d.ImageAltTextBg AS DraftAltTextBg,
                    img.SourceKind AS ImageKind, img.Url AS ImageUrl,
-                   img.AltTextBg AS ImageAltTextBg, img.Attribution AS ImageAttribution
+                   img.AltTextBg AS ImageAltTextBg, img.Attribution AS ImageAttribution,
+                   d.PublishTarget AS PublishTargetName
             FROM dbo.nw_Draft d
             OUTER APPLY (
                 SELECT TOP 1 di.SourceKind, di.Url, di.AltTextBg, di.Attribution
@@ -66,12 +68,14 @@ public sealed class PublishRepository(IDbConnectionFactory db, ImageStorage stor
                   SELECT SUM(p.Attempts) FROM dbo.nw_PublishRecord p
                   WHERE p.DraftId = d.Id AND p.Destination = @destination
                     AND p.Status = @failedStatus), 0) < @maxAttempts
+              AND d.PublishTarget IN @targets
             ORDER BY d.Id
             """,
             new
             {
                 maxCount,
                 destination,
+                targets,
                 maxAttempts,
                 approvedStatus = nameof(DraftStatus.Approved),
                 succeededStatus = SucceededStatus,
@@ -81,7 +85,7 @@ public sealed class PublishRepository(IDbConnectionFactory db, ImageStorage stor
     }
 
     public async Task<IReadOnlyList<FacebookPost>> GetPendingFacebookAsync(
-        int maxAttempts, int maxCount, CancellationToken ct)
+        IReadOnlyList<string> targets, int maxAttempts, int maxCount, CancellationToken ct)
     {
         using var connection = await db.OpenAsync(ct);
         var rows = await connection.QueryAsync<FacebookRow>(
@@ -91,7 +95,8 @@ public sealed class PublishRepository(IDbConnectionFactory db, ImageStorage stor
                    d.SeoDescription,
                    d.FacebookCaption, d.FacebookHashtagsJson,
                    ISNULL(d.BodyMarkdown, '') AS BodyMarkdown,
-                   site.ExternalUrl AS ArticleUrl
+                   site.ExternalUrl AS ArticleUrl,
+                   d.PublishTarget AS PublishTargetName
             FROM dbo.nw_Draft d
             CROSS APPLY (
                 SELECT TOP 1 p.ExternalUrl
@@ -110,11 +115,13 @@ public sealed class PublishRepository(IDbConnectionFactory db, ImageStorage stor
                   WHERE p.DraftId = d.Id AND p.Destination = @facebook
                     AND p.Status = @failedStatus), 0) < @maxAttempts
               AND (d.ScheduledForUtc IS NULL OR d.ScheduledForUtc <= SYSUTCDATETIME())
+              AND d.PublishTarget IN @targets
             ORDER BY d.Id
             """,
             new
             {
                 maxCount,
+                targets,
                 maxAttempts,
                 umbraco = PublishDestinations.Umbraco,
                 facebook = PublishDestinations.Facebook,
@@ -125,15 +132,15 @@ public sealed class PublishRepository(IDbConnectionFactory db, ImageStorage stor
         return rows.Select(r => string.IsNullOrWhiteSpace(r.FacebookCaption)
             ? new FacebookPost(
                 r.DraftId, r.Headline, FacebookTeaser.Compose(r.SeoDescription, r.BodyMarkdown),
-                r.ArticleUrl)
+                r.ArticleUrl, Target: PublishTargets.Parse(r.PublishTargetName))
             : new FacebookPost(
                 r.DraftId, Headline: "",
                 FacebookCaption.Compose(r.FacebookCaption, ParseStringList(r.FacebookHashtagsJson)),
-                r.ArticleUrl)).ToList();
+                r.ArticleUrl, Target: PublishTargets.Parse(r.PublishTargetName))).ToList();
     }
 
     public async Task<IReadOnlyList<FacebookPost>> GetApprovedForFacebookAsync(
-        int maxAttempts, int maxCount, CancellationToken ct)
+        IReadOnlyList<string> targets, int maxAttempts, int maxCount, CancellationToken ct)
     {
         using var connection = await db.OpenAsync(ct);
         // Facebook-only mode: no Umbraco join and no site URL. Selection mirrors
@@ -147,7 +154,8 @@ public sealed class PublishRepository(IDbConnectionFactory db, ImageStorage stor
                    d.Id AS DraftId, ISNULL(d.Headline, '') AS Headline,
                    ISNULL(d.BodyMarkdown, '') AS BodyMarkdown, d.PromptVersion,
                    d.FacebookCaption, d.FacebookHashtagsJson,
-                   img.SourceKind AS ImageKind, img.Url AS ImageUrl
+                   img.SourceKind AS ImageKind, img.Url AS ImageUrl,
+                   d.PublishTarget AS PublishTargetName
             FROM dbo.nw_Draft d
             OUTER APPLY (
                 SELECT TOP 1 di.SourceKind, di.Url
@@ -165,11 +173,13 @@ public sealed class PublishRepository(IDbConnectionFactory db, ImageStorage stor
                   WHERE p.DraftId = d.Id AND p.Destination = @facebook
                     AND p.Status = @failedStatus), 0) < @maxAttempts
               AND (d.ScheduledForUtc IS NULL OR d.ScheduledForUtc <= SYSUTCDATETIME())
+              AND d.PublishTarget IN @targets
             ORDER BY d.Id
             """,
             new
             {
                 maxCount,
+                targets,
                 maxAttempts,
                 approvedStatus = nameof(DraftStatus.Approved),
                 facebook = PublishDestinations.Facebook,
@@ -185,16 +195,18 @@ public sealed class PublishRepository(IDbConnectionFactory db, ImageStorage stor
         return rows.Select(r =>
         {
             var image = ToFacebookImage(r.ImageKind, r.ImageUrl);
+            var target = PublishTargets.Parse(r.PublishTargetName);
             if (r.PromptVersion == ManualTopic.EditorPromptVersion)
-                return new FacebookPost(r.DraftId, r.Headline, r.BodyMarkdown, ArticleUrl: "", image);
+                return new FacebookPost(
+                    r.DraftId, r.Headline, r.BodyMarkdown, ArticleUrl: "", image, Target: target);
             if (!string.IsNullOrWhiteSpace(r.FacebookCaption))
                 return new FacebookPost(
                     r.DraftId, Headline: "",
                     FacebookCaption.Compose(r.FacebookCaption, ParseStringList(r.FacebookHashtagsJson)),
-                    ArticleUrl: "", image);
+                    ArticleUrl: "", image, Target: target);
             return new FacebookPost(
                 r.DraftId, r.Headline, FacebookTeaser.ComposeFullBody(r.BodyMarkdown),
-                ArticleUrl: "", image);
+                ArticleUrl: "", image, Target: target);
         }).ToList();
     }
 
@@ -223,7 +235,8 @@ public sealed class PublishRepository(IDbConnectionFactory db, ImageStorage stor
                    d.SeoDescription,
                    d.FacebookCaption, d.FacebookHashtagsJson,
                    ISNULL(d.BodyMarkdown, '') AS BodyMarkdown,
-                   '' AS ArticleUrl
+                   '' AS ArticleUrl,
+                   d.PublishTarget AS PublishTargetName
             FROM dbo.nw_Draft d
             WHERE d.Id = @draftId
             """,
@@ -344,7 +357,8 @@ public sealed class PublishRepository(IDbConnectionFactory db, ImageStorage stor
         ParseStringList(r.TagsJson),
         r.SeoTitle,
         r.SeoDescription,
-        ToImage(r));
+        ToImage(r),
+        Target: PublishTargets.Parse(r.PublishTargetName));
 
     private PublishImage? ToImage(PublishRow r)
     {
@@ -411,7 +425,8 @@ public sealed class PublishRepository(IDbConnectionFactory db, ImageStorage stor
         string? FacebookCaption,
         string? FacebookHashtagsJson,
         string BodyMarkdown,
-        string ArticleUrl);
+        string ArticleUrl,
+        string PublishTargetName);
 
     /// <summary>Dapper row shape of <see cref="GetApprovedForFacebookAsync"/> — adds the chosen
     /// image (source kind + URL/local path), PromptVersion (to detect editor-authored drafts
@@ -425,7 +440,8 @@ public sealed class PublishRepository(IDbConnectionFactory db, ImageStorage stor
         string? FacebookCaption,
         string? FacebookHashtagsJson,
         string? ImageKind,
-        string? ImageUrl);
+        string? ImageUrl,
+        string PublishTargetName);
 
     /// <summary>Dapper row shape of <see cref="GetApprovedUnpublishedAsync"/>.</summary>
     private sealed record PublishRow(
@@ -443,5 +459,6 @@ public sealed class PublishRepository(IDbConnectionFactory db, ImageStorage stor
         string? ImageKind,
         string? ImageUrl,
         string? ImageAltTextBg,
-        string? ImageAttribution);
+        string? ImageAttribution,
+        string PublishTargetName);
 }

@@ -60,17 +60,21 @@ public interface IPublishRepository
     /// and summed failed attempts below <paramref name="maxAttempts"/>, shaped for the
     /// endpoint: TagsJson deserialized, and the draft's chosen image (Selected, else lowest
     /// Ordinal) attached — null when there is none or the pick is an editor upload
-    /// (Telegram file_ids are not resolvable by the site in v1).</summary>
+    /// (Telegram file_ids are not resolvable by the site in v1).
+    /// <para><paramref name="targets"/> filters on nw_Draft.PublishTarget — the caller passes
+    /// <see cref="PublishTargets.UmbracoLeg"/>.</para></summary>
     Task<IReadOnlyList<ArticleToPublish>> GetApprovedUnpublishedAsync(
-        string destination, int maxAttempts, int maxCount, CancellationToken ct);
+        string destination, IReadOnlyList<string> targets, int maxAttempts, int maxCount,
+        CancellationToken ct);
 
     /// <summary>Drafts whose site publish Succeeded but whose Facebook post is still pending:
     /// status PartiallyPublished, no Succeeded 'facebook' record, and summed failed 'facebook'
     /// attempts below <paramref name="maxAttempts"/> — shaped for the Graph API with the teaser
     /// already composed (<see cref="FacebookTeaser"/>) and the live URL taken from the
-    /// draft's Succeeded 'umbraco' record.</summary>
+    /// draft's Succeeded 'umbraco' record.
+    /// <para><paramref name="targets"/> is <see cref="PublishTargets.FacebookLinkLeg"/>.</para></summary>
     Task<IReadOnlyList<FacebookPost>> GetPendingFacebookAsync(
-        int maxAttempts, int maxCount, CancellationToken ct);
+        IReadOnlyList<string> targets, int maxAttempts, int maxCount, CancellationToken ct);
 
     /// <summary>Builds a <see cref="FacebookPost"/> from any draft by id (teaser composed like
     /// <see cref="GetPendingFacebookAsync"/>, no link since there is no site publish) — for the
@@ -82,9 +86,11 @@ public interface IPublishRepository
     /// with no Succeeded 'facebook' record and summed failed 'facebook' attempts below
     /// <paramref name="maxAttempts"/> — shaped for the Graph API with the teaser composed and an
     /// empty link (a plain-text post). This is the site-independent sibling of
-    /// <see cref="GetPendingFacebookAsync"/>; it never touches the 'umbraco' destination.</summary>
+    /// <see cref="GetPendingFacebookAsync"/>; it never touches the 'umbraco' destination.
+    /// <para><paramref name="targets"/> is <see cref="PublishTargets.FacebookStandaloneLeg"/>,
+    /// which widens to every target under Publishing:FacebookOnly.</para></summary>
     Task<IReadOnlyList<FacebookPost>> GetApprovedForFacebookAsync(
-        int maxAttempts, int maxCount, CancellationToken ct);
+        IReadOnlyList<string> targets, int maxAttempts, int maxCount, CancellationToken ct);
 
     /// <summary>Inserts the Succeeded record and recalculates the draft status in the same
     /// transaction: Published when every destination in <paramref name="requiredDestinations"/>
