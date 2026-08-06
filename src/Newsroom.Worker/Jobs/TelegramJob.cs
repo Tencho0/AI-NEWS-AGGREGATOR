@@ -284,21 +284,26 @@ public sealed class TelegramJob(
         {
             case ApproveDraft approve:
                 var approveView = await reviews.GetReviewViewAsync(approve.DraftId, ct);
-                if (approveView is { IsManual: true } && string.IsNullOrWhiteSpace(approveView.Category))
+                // The category gate exists only because Umbraco rejects a publish without one, so
+                // it applies to every target EXCEPT Facebook-only, which never calls the site.
+                // Still defense in depth: callback_data is not tied to what is currently
+                // rendered — a replayed or crafted press must not approve an unpublishable draft.
+                if (approve.Target is not PublishTarget.Facebook
+                    && approveView is { IsManual: true } && string.IsNullOrWhiteSpace(approveView.Category))
                 {
-                    // Defense in depth: the AwaitingCategory keyboard has no ✅ button, but
-                    // callback_data is not tied to what is currently rendered — a replayed or
-                    // crafted press must not approve an unpublishable draft.
                     await gateway.Value.AnswerCallbackAsync(callback.CallbackId, "Първо избери категория", ct);
                     break;
                 }
-                // TryApprove: the normal PendingReview → Approved path. TryUnschedule: ✅ on an
-                // already-📅-scheduled draft clears the gate — "now" beats the slot by design.
+
+                // TryApprove: the normal PendingReview → Approved path, now carrying the target.
+                // TryUnschedule: ✅ on an already-📅-scheduled draft clears the gate — "now" beats
+                // the slot by design, and that draft is already Both.
                 var transitioned =
                     await reviews.TryApproveAsync(approve.DraftId, approve.Target, callback.UserId, callback.UserName, ct)
                     || await reviews.TryUnscheduleAsync(approve.DraftId, callback.UserId, callback.UserName, ct);
+                var targetSuffix = TargetSuffix(approve.Target);
                 await ResolveDraftAsync(callback, approve.DraftId, transitioned,
-                    toast: "✅ Одобрено", statusLine: $"✅ Одобрено от {editor}", ct);
+                    toast: $"✅ Одобрено{targetSuffix}", statusLine: $"✅ Одобрено{targetSuffix} от {editor}", ct);
                 break;
 
             case RejectDraft reject:
@@ -365,6 +370,16 @@ public sealed class TelegramJob(
                 break;
         }
     }
+
+    /// <summary>Names the chosen destination on the resolved card and its toast. Both — what ✅
+    /// has always meant — stays unmarked, so the common case reads exactly as it did before
+    /// targets existed.</summary>
+    private static string TargetSuffix(PublishTarget target) => target switch
+    {
+        PublishTarget.Website => " (само сайт)",
+        PublishTarget.Facebook => " (само ФБ)",
+        _ => "",
+    };
 
     private async Task ResolveDraftAsync(
         TgCallback callback, long draftId, bool transitioned, string toast, string statusLine,
