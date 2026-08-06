@@ -21,8 +21,9 @@ public static class FacebookTeaser
         return TruncateOnWordBoundary(StripMarkdown(bodyMarkdown), MaxBodyChars);
     }
 
-    /// <summary>The whole article body as plain text for a Facebook-only post (Publishing:
-    /// FacebookOnly) — there is no website link to carry the full read, so the post *is* the
+    /// <summary>The whole article body as plain text for a standalone Facebook post (normally a
+    /// Facebook-target draft; also a Both draft while the Publishing:FacebookOnly kill-switch is
+    /// on) — there is no website link to carry the full read, so the post *is* the
     /// article. Markdown markers are stripped like <see cref="StripMarkdown"/> (Facebook renders
     /// no markdown, so a literal <c>**</c> or <c>*</c> would just be noise), but line breaks are
     /// preserved: every non-blank source line stays its own row and runs of blank lines collapse

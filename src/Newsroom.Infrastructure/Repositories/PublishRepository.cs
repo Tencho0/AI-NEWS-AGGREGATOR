@@ -143,11 +143,15 @@ public sealed class PublishRepository(IDbConnectionFactory db, ImageStorage stor
         IReadOnlyList<string> targets, int maxAttempts, int maxCount, CancellationToken ct)
     {
         using var connection = await db.OpenAsync(ct);
-        // Facebook-only mode: no Umbraco join and no site URL. Selection mirrors
-        // GetPendingFacebookAsync's Facebook gate (no Succeeded 'facebook' record, failed attempts
-        // under the cap) but keys off Approved drafts directly. The draft's chosen image (Selected
-        // first, else lowest Ordinal — the same pick as the Umbraco leg) rides along so the page
-        // post carries the picture, not just text.
+        // Standalone Facebook leg: no Umbraco join and no site URL, whatever draft lands here.
+        // Normally that is Facebook-target drafts only (📘 Само ФБ); while Publishing:FacebookOnly
+        // is on the caller widens `targets` to also admit Both (PublishTargets.FacebookStandaloneLeg)
+        // so a Both draft posts here instead of waiting on a site publish the flag has disabled —
+        // Website is never admitted, flag or not. Selection mirrors GetPendingFacebookAsync's
+        // Facebook gate (no Succeeded 'facebook' record, failed attempts under the cap) but keys
+        // off Approved drafts directly. The draft's chosen image (Selected first, else lowest
+        // Ordinal — the same pick as the Umbraco leg) rides along so the page post carries the
+        // picture, not just text.
         var rows = await connection.QueryAsync<FacebookApprovedRow>(
             """
             SELECT TOP (@maxCount)

@@ -220,9 +220,11 @@ public sealed class PublishJob(
     // ---- Facebook leg ------------------------------------------------------------------
 
     /// <summary>Posts the page post for the drafts the repository hands us, with per-draft error
-    /// isolation. In the normal pipeline these are drafts whose site publish succeeded (sitting in
-    /// PartiallyPublished with Facebook budget left); in Facebook-only mode they are Approved
-    /// drafts with no site step at all. Either way the repository query owns the gate.</summary>
+    /// isolation. Two shapes, both run every cycle: link posts for Both drafts whose site publish
+    /// already succeeded (sitting in PartiallyPublished with Facebook budget left), and standalone
+    /// posts for Approved Facebook-target drafts — the latter is the normal home of 📘 Само ФБ in
+    /// every mode, not something Publishing:FacebookOnly turns on; that flag only widens it to
+    /// additionally admit Both drafts. Either way the repository query owns the gate.</summary>
     private async Task RunFacebookLegAsync(CancellationToken ct)
     {
         IReadOnlyList<FacebookPost> posts;
@@ -285,9 +287,12 @@ public sealed class PublishJob(
         await NotifyFacebookPostedAsync(post, result, ct);
     }
 
-    /// <summary>Same weighting as the Umbraco leg, but exhaustion never demotes the draft —
-    /// the site is live, so it stays PartiallyPublished (the repository only flips Approved
-    /// drafts to PublishFailed) and the editor is alerted exactly once to post by hand.</summary>
+    /// <summary>Same weighting as the Umbraco leg. Exhaustion's effect on the draft depends on
+    /// what already happened to it: a Facebook-target draft is still Approved (no site step ever
+    /// runs for it), so the repository demotes it to PublishFailed here; a Both draft that
+    /// already has its site publish is PartiallyPublished and keeps that status — the site is
+    /// live, only the Facebook leg is spent. Either way the editor is alerted exactly once to
+    /// post by hand.</summary>
     private async Task HandleFacebookFailureAsync(
         FacebookPost post, string error, bool rejected, CancellationToken ct)
     {
@@ -311,9 +316,15 @@ public sealed class PublishJob(
         logger.LogWarning("Draft {DraftId} ({Headline}) will not be re-posted to Facebook",
             post.DraftId, post.DisplayTitle);
         var reason = Truncate(error, 200);
+        // A Facebook-target draft never had a site step, so exhaustion leaves nothing published
+        // anywhere (the repository just demoted it to PublishFailed) — say that instead of the
+        // Both/Website wording, which would tell the editor the site is live when it never ran.
+        var closingLine = post.Target is PublishTarget.Facebook
+            ? "Статията не е публикувана никъде — постни ръчно."
+            : "Сайтът е публикуван — постни ръчно.";
         await TryAlertAsync(rejected
-            ? $"⚠️ Facebook отхвърли поста за „{post.DisplayTitle}“: {reason}\nСайтът е публикуван — постни ръчно."
-            : $"⚠️ Постът във Facebook за „{post.DisplayTitle}“ се провали след {facebookOptions.MaxAttempts} опита: {reason}\nСайтът е публикуван — постни ръчно.",
+            ? $"⚠️ Facebook отхвърли поста за „{post.DisplayTitle}“: {reason}\n{closingLine}"
+            : $"⚠️ Постът във Facebook за „{post.DisplayTitle}“ се провали след {facebookOptions.MaxAttempts} опита: {reason}\n{closingLine}",
             ct);
     }
 

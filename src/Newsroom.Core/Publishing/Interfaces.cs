@@ -81,14 +81,19 @@ public interface IPublishRepository
     /// manual test hook only (<c>Facebook:TestPostDraftId</c>). Null when the draft is unknown.</summary>
     Task<FacebookPost?> GetFacebookPostForDraftAsync(long draftId, CancellationToken ct);
 
-    /// <summary>Facebook-only mode (<c>Publishing:FacebookOnly</c>, decision-log 2026-07-08):
-    /// Approved drafts posted straight to the page with no site publish. Selects Approved drafts
-    /// with no Succeeded 'facebook' record and summed failed 'facebook' attempts below
-    /// <paramref name="maxAttempts"/> — shaped for the Graph API with the teaser composed and an
-    /// empty link (a plain-text post). This is the site-independent sibling of
+    /// <summary>The standalone Facebook leg: Approved drafts posted straight to the page with no
+    /// site publish and no link. This is the normal home of a <c>Facebook</c>-target draft (📘
+    /// Само ФБ) in every mode — it is not something <c>Publishing:FacebookOnly</c> turns on.
+    /// Selects Approved drafts with no Succeeded 'facebook' record and summed failed 'facebook'
+    /// attempts below <paramref name="maxAttempts"/> — shaped for the Graph API with the teaser
+    /// composed and an empty link (a plain-text post). This is the site-independent sibling of
     /// <see cref="GetPendingFacebookAsync"/>; it never touches the 'umbraco' destination.
     /// <para><paramref name="targets"/> is <see cref="PublishTargets.FacebookStandaloneLeg"/>,
-    /// which widens to every target under Publishing:FacebookOnly.</para></summary>
+    /// which additionally admits <c>Both</c> while <c>Publishing:FacebookOnly</c> (an ops
+    /// kill-switch, decision-log 2026-07-08) is on, so a Both draft keeps posting to the page
+    /// instead of stalling on a site publish the flag has disabled. <c>Website</c> is never
+    /// admitted here, flag or not — 🌐 Само сайт is the editor's explicit "not Facebook", and the
+    /// flag does not override it.</para></summary>
     Task<IReadOnlyList<FacebookPost>> GetApprovedForFacebookAsync(
         IReadOnlyList<string> targets, int maxAttempts, int maxCount, CancellationToken ct);
 
