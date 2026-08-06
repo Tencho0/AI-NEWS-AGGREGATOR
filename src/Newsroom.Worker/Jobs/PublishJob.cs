@@ -288,11 +288,11 @@ public sealed class PublishJob(
     }
 
     /// <summary>Same weighting as the Umbraco leg. Exhaustion's effect on the draft depends on
-    /// what already happened to it: a Facebook-target draft is still Approved (no site step ever
-    /// runs for it), so the repository demotes it to PublishFailed here; a Both draft that
-    /// already has its site publish is PartiallyPublished and keeps that status — the site is
-    /// live, only the Facebook leg is spent. Either way the editor is alerted exactly once to
-    /// post by hand.</summary>
+    /// what already happened to it: a draft is demoted to PublishFailed when no site publish
+    /// ever ran—whether because it targets Facebook alone or because FacebookOnly mode
+    /// suppresses the site leg; a Both draft that reached PartiallyPublished keeps that status—
+    /// the site is live, only the Facebook leg is spent. Either way the editor is alerted
+    /// exactly once to post by hand.</summary>
     private async Task HandleFacebookFailureAsync(
         FacebookPost post, string error, bool rejected, CancellationToken ct)
     {
@@ -317,9 +317,10 @@ public sealed class PublishJob(
             post.DraftId, post.DisplayTitle);
         var reason = Truncate(error, 200);
         // A Facebook-target draft never had a site step, so exhaustion leaves nothing published
-        // anywhere (the repository just demoted it to PublishFailed) — say that instead of the
-        // Both/Website wording, which would tell the editor the site is live when it never ran.
-        var closingLine = post.Target is PublishTarget.Facebook
+        // anywhere. Under FacebookOnly mode, no draft gets a site step either, so any draft is
+        // demoted to PublishFailed. Say that instead of the Both/Website wording, which would
+        // tell the editor the site is live when it never ran.
+        var closingLine = post.Target is PublishTarget.Facebook || publishing.FacebookOnly
             ? "Статията не е публикувана никъде — постни ръчно."
             : "Сайтът е публикуван — постни ръчно.";
         await TryAlertAsync(rejected
