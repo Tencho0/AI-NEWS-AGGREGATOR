@@ -99,7 +99,7 @@ each command's response is in [`TelegramJob`](../../src/Newsroom.Worker/Jobs/Tel
 | `/topics` | Lists the top tracked topics. |
 | `/quota` | AI requests used vs the daily per-stage cap today. |
 | `/health` | Last heartbeat per background job, with a staleness marker. |
-| `/help` | Prints the command list, including the per-card actions (now mentions 📅 alongside ✅/✏️/🖼/❌). |
+| `/help` | Prints the command list, including the per-card actions (now mentions ✅/🌐/📘/📅/✏️/🖼/❌). |
 | `/mute <topicId> [hours]` | Silences one topic. `hours` is optional and **defaults to 24**; e.g. `/mute 42` or `/mute 42 6`. Replies with confirmation or "няма такава тема" if the id is unknown. |
 | `/unmute <topicId>` | Lifts a topic mute early (reverse of `/mute`). |
 | `/pause` | Stops **draft generation** (runtime flag `Draft:Paused` in `nw_Config`). Scraping and analysis keep running. |
