@@ -1001,9 +1001,12 @@ git commit -m "feat(review): approve per target, with the target named on the re
 
 **Files:**
 - Modify: `docs/05-integrations/telegram.md` (review message format ~line 44, card actions table ~line 112)
+- Modify: `docs/superpowers/specs/2026-08-06-per-draft-publish-target-design.md` (the button-gating paragraph)
 - Modify: `docs/decision-log.md` (append a dated row)
 
 **Interfaces:** none.
+
+> **Amended after Task 5's review (2026-08-06),** in step with Task 6: both target buttons are gated on the worker being able to honour them, not just 🌐. The docs below say so, and the design doc's own paragraph — which currently claims *only* 🌐 is ever hidden — is corrected here rather than left to contradict the shipped code.
 
 - [ ] **Step 1: Update the review message format**
 
@@ -1013,7 +1016,11 @@ In `docs/05-integrations/telegram.md`, replace the keyboard bullets under "Revie
 + inline keyboard: ✅ Одобри · ✏️ Промени · ❌ Откажи
 + target row: 🌐 Само сайт · 📘 Само ФБ — the per-draft publish target
   (docs/superpowers/specs/2026-08-06-per-draft-publish-target-design.md). ✅ above them means
-  both destinations, the pre-existing flow. 🌐 is omitted while `Publishing:FacebookOnly` is on.
+  both destinations, the pre-existing flow. Each button appears only when the worker can
+  actually honour it: 🌐 is dropped while `Publishing:FacebookOnly` is on (the website leg is
+  skipped outright), and 📘 is dropped when Facebook is unconfigured (`PublishJob` then skips
+  the Facebook leg entirely, so a Facebook-only draft would sit `Approved` forever, selected by
+  no leg). With both unavailable the row is omitted rather than sent empty.
 + photo message keyboard: 🖼 Друга снимка
 + last keyboard row: 📅 Насрочи {HH:mm} (always present; the label degrades to a bare
   „📅 Насрочи" when the suggested slot could not be computed). 📅 always means both destinations.
@@ -1026,7 +1033,7 @@ In the same file, replace the `Approve` row of the "Card actions" table and add 
 ```markdown
 | Approve (both) | ✅ button | Publishes to the website, then posts the link to the Facebook page; on an already-scheduled draft, clears the schedule and publishes instead. |
 | Approve (site only) | 🌐 Само сайт | Publishes to the website only. The draft reaches `Published` on the site publish alone — Facebook is not in its required set. |
-| Approve (Facebook only) | 📘 Само ФБ | Posts to the Facebook page only, as a standalone post (caption + image, no link) — the article never reaches the site. Available even on an `AwaitingCategory` `/post` card, since only Umbraco requires a category. |
+| Approve (Facebook only) | 📘 Само ФБ | Posts to the Facebook page only, as a standalone post (caption + image, no link) — the article never reaches the site. Available even on an `AwaitingCategory` `/post` card, since only Umbraco requires a category. Hidden entirely when Facebook is unconfigured. |
 ```
 
 - [ ] **Step 3: Note the manual-card exception**
@@ -1037,18 +1044,34 @@ In the same file, in the `/post` row of the slash-command table, after "The revi
 — 📘 Само ФБ is the exception and stays tappable, because a Facebook-only post never calls Umbraco and so has no category requirement —
 ```
 
-- [ ] **Step 4: Add the decision-log row**
+- [ ] **Step 4: Correct the design doc's button-gating paragraph**
+
+In `docs/superpowers/specs/2026-08-06-per-draft-publish-target-design.md`, under "Interaction with the global flag", the paragraph beginning "Only the 🌐 Само сайт button is omitted from cards while the flag is on" is now wrong — 📘 is gated too, on a different condition. Replace that paragraph with:
+
+```markdown
+Each target button is offered only when the worker can actually honour it, so a card can never
+promise a destination that publishes nowhere. 🌐 Само сайт is dropped while the flag is on. 📘
+Само ФБ is dropped when Facebook is unconfigured — `PublishJob.RunCycleAsync` then skips the
+Facebook leg entirely while the Umbraco leg's target filter excludes Facebook-only drafts, so
+such a draft would sit `Approved` forever, selected by no leg and never alerted on. (That second
+gate was missed in this design's first draft and added during implementation, after Task 5's
+review traced the dead end.) With neither destination available the row is omitted rather than
+sent empty. ✅ and 📅 always remain and mean "publish everywhere possible", which under the flag
+is Facebook: the same thing they mean today.
+```
+
+- [ ] **Step 5: Add the decision-log row**
 
 Append to the table in `docs/decision-log.md`:
 
 ```markdown
-| 2026-08-06 | — | **Publish target is per draft, not per process:** the review card gains 🌐 Само сайт and 📘 Само ФБ next to ✅ Одобри, writing `nw_Draft.PublishTarget` (`Both` \| `Website` \| `Facebook`, migration 0016). `PublishJob` asks `PublishTargets.RequiredDestinations` per draft instead of computing one process-wide array at construction, and the two Facebook queries (link post after the site publish vs. standalone post) now both run each cycle, filtered by target, instead of being selected by `Publishing:FacebookOnly`. That flag survives as an ops kill-switch and **overrides** the column: while it is on, the standalone query accepts every target — otherwise a draft approved as Both, or scheduled with 📅 (which always writes Both), would wait forever for a site publish the flag has disabled | Accepted |
+| 2026-08-06 | — | **Publish target is per draft, not per process:** the review card gains 🌐 Само сайт and 📘 Само ФБ next to ✅ Одобри, writing `nw_Draft.PublishTarget` (`Both` \| `Website` \| `Facebook`, migration 0016). `PublishJob` asks `PublishTargets.RequiredDestinations` per draft instead of computing one process-wide array at construction, and the two Facebook queries (link post after the site publish vs. standalone post) now both run each cycle, filtered by target, instead of being selected by `Publishing:FacebookOnly`. That flag survives as an ops kill-switch and **overrides** the column: while it is on, the standalone query accepts every target — otherwise a draft approved as Both, or scheduled with 📅 (which always writes Both), would wait forever for a site publish the flag has disabled. Each target button is gated on its destination being reachable: 🌐 hidden under the flag, 📘 hidden when Facebook is unconfigured — without that second gate a Facebook-only draft in a Facebook-less deployment is selected by no leg and sits `Approved` silently forever | Accepted |
 ```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add docs/05-integrations/telegram.md docs/decision-log.md
+git add docs/05-integrations/telegram.md docs/decision-log.md docs/superpowers/specs/2026-08-06-per-draft-publish-target-design.md
 git commit -m "docs: per-draft publish target on the review card"
 ```
 
