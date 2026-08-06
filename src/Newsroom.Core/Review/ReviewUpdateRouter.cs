@@ -1,4 +1,5 @@
 using System.Globalization;
+using Newsroom.Core.Publishing;
 
 namespace Newsroom.Core.Review;
 
@@ -35,6 +36,8 @@ public static class ReviewUpdateRouter
         return (segments[0], segments.Length) switch
         {
             ("approve", 2) => new ApproveDraft(draftId),
+            ("approve", 3) when PublishTargets.TryParseCallbackToken(segments[2], out var target) =>
+                new ApproveDraft(draftId, target),
             ("reject", 2) => new RejectDraft(draftId),
             ("changes", 2) => new RequestChanges(draftId),
             ("image", 2) => new CycleImage(draftId),

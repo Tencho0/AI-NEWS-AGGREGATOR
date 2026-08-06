@@ -1,3 +1,5 @@
+using Newsroom.Core.Publishing;
+
 namespace Newsroom.Core.Review;
 
 /// <summary>
@@ -7,7 +9,11 @@ namespace Newsroom.Core.Review;
 /// </summary>
 public abstract record ReviewCommand;
 
-public sealed record ApproveDraft(long DraftId) : ReviewCommand;
+/// <summary>✅/🌐/📘 pressed: approve the draft for a specific destination set. A bare
+/// "approve:{draftId}" callback (no target token) is <see cref="PublishTarget.Both"/> — the
+/// pre-feature meaning, kept so cards already in the chat and the scheduled card's
+/// „✅ Одобри веднага" button keep working across a deploy.</summary>
+public sealed record ApproveDraft(long DraftId, PublishTarget Target = PublishTarget.Both) : ReviewCommand;
 
 public sealed record RejectDraft(long DraftId) : ReviewCommand;
 

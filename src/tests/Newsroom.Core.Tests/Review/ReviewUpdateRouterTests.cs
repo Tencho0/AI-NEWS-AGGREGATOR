@@ -1,3 +1,4 @@
+using Newsroom.Core.Publishing;
 using Newsroom.Core.Review;
 
 namespace Newsroom.Core.Tests.Review;
@@ -42,6 +43,34 @@ public class ReviewUpdateRouterTests
         Assert.Equal(new ApproveDraft(42), RouteCallback(Callback("approve:42")));
         Assert.Equal(new RejectDraft(42), RouteCallback(Callback("reject:42")));
         Assert.Equal(new RequestChanges(42), RouteCallback(Callback("changes:42")));
+    }
+
+    [Fact]
+    public void Approve_without_a_target_token_means_both_destinations()
+    {
+        // Cards posted before this feature, and the scheduled card's „✅ Одобри веднага" button,
+        // both emit the bare two-segment form — it must keep its original meaning.
+        Assert.Equal(new ApproveDraft(42, PublishTarget.Both), RouteCallback(Callback("approve:42")));
+    }
+
+    [Fact]
+    public void Approve_with_a_target_token_routes_to_that_target()
+    {
+        Assert.Equal(
+            new ApproveDraft(42, PublishTarget.Website), RouteCallback(Callback("approve:42:site")));
+        Assert.Equal(
+            new ApproveDraft(42, PublishTarget.Facebook), RouteCallback(Callback("approve:42:fb")));
+    }
+
+    [Theory]
+    [InlineData("approve:42:both")]
+    [InlineData("approve:42:")]
+    [InlineData("approve:42:xyz")]
+    [InlineData("approve:42:site:extra")]
+    public void Approve_with_an_unusable_target_token_is_ignored(string data)
+    {
+        // A crafted or corrupted callback must never construct a target outside the enum.
+        Assert.Equal(new Ignore(ReviewUpdateRouter.ReasonUnknownData), RouteCallback(Callback(data)));
     }
 
     [Fact]
