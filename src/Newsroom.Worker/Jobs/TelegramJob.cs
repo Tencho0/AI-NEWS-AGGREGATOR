@@ -320,7 +320,7 @@ public sealed class TelegramJob(
                 break;
 
             case SetDraftCategory setCategory:
-                if (await reviews.FindDraftByReviewMessageAsync(callback.MessageId, ct) != setCategory.DraftId)
+                if (await reviews.FindEditableDraftByReviewMessageAsync(callback.MessageId, ct) != setCategory.DraftId)
                 {
                     await AnswerBestEffortAsync(callback.CallbackId, "Вече обработено", ct);
                     break;
@@ -333,7 +333,7 @@ public sealed class TelegramJob(
                 break;
 
             case SetDraftRegion setRegion:
-                if (await reviews.FindDraftByReviewMessageAsync(callback.MessageId, ct) != setRegion.DraftId)
+                if (await reviews.FindEditableDraftByReviewMessageAsync(callback.MessageId, ct) != setRegion.DraftId)
                 {
                     await AnswerBestEffortAsync(callback.CallbackId, "Вече обработено", ct);
                     break;
@@ -346,7 +346,7 @@ public sealed class TelegramJob(
                 break;
 
             case ShowMetaPicker meta:
-                if (await reviews.FindDraftByReviewMessageAsync(callback.MessageId, ct) != meta.DraftId)
+                if (await reviews.FindEditableDraftByReviewMessageAsync(callback.MessageId, ct) != meta.DraftId)
                 {
                     await AnswerBestEffortAsync(callback.CallbackId, "Вече обработено", ct);
                     break;
@@ -538,7 +538,7 @@ public sealed class TelegramJob(
                 await reviews.ClearPendingConversationAsync(text.ChatId, text.UserId, ct);
                 var tagsView = await reviews.GetReviewViewAsync(setTags.DraftId, ct);
                 if (tagsView?.TelegramMessageId is not { } tagsMessageId
-                    || await reviews.FindDraftByReviewMessageAsync(tagsMessageId, ct) != setTags.DraftId)
+                    || await reviews.FindEditableDraftByReviewMessageAsync(tagsMessageId, ct) != setTags.DraftId)
                 {
                     await SendTextAsync(text.ChatId, "Вече обработено.", ct);
                     break;

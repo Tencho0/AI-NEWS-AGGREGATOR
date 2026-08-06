@@ -125,6 +125,13 @@ public interface IReviewRepository
     /// message belongs to no pending draft.</summary>
     Task<long?> FindDraftByReviewMessageAsync(long messageId, CancellationToken ct);
 
+    /// <summary>As <see cref="FindDraftByReviewMessageAsync"/>, but also matches a
+    /// <c>PublishFailed</c> draft — used only by the category/region/tags picker's write guards,
+    /// which must be reachable on both the initial /post review and the in-app repair path
+    /// (<c>DraftRepository.ReopenIfPublishFailedAsync</c>). Every other caller (photo-attach, ✏️
+    /// reply-binding) keeps using the PendingReview-only lookup above.</summary>
+    Task<long?> FindEditableDraftByReviewMessageAsync(long messageId, CancellationToken ct);
+
     /// <summary>Attaches an editor-uploaded photo (docs/05-integrations/images.md tier 4): one
     /// 'editor-upload' nw_DraftImage row (Url = <paramref name="localPath"/>, Ordinal = max+1)
     /// that takes Selected over everything else, plus the 'ImageAttached' nw_ReviewAction —

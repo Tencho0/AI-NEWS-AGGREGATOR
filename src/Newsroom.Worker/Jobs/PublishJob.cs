@@ -186,6 +186,40 @@ public sealed class PublishJob(
             ? $"⚠️ Публикуването на „{article.Headline}“ е отхвърлено: {reason}"
             : $"⚠️ Публикуването на „{article.Headline}“ се провали след {options.MaxAttempts} опита: {reason}",
             ct);
+        await OfferManualRepairCardAsync(article.DraftId, ct);
+    }
+
+    /// <summary>For a manual (/post) draft that just became PublishFailed: posts a fresh review
+    /// card carrying the category/region/tags picker, since the original card's buttons were
+    /// already stripped at ✅ time — this is the only live entry point back to the picker. A
+    /// category/region/tags tap on it runs DraftRepository.ReopenIfPublishFailedAsync, which puts
+    /// the draft back in the publish queue with no manual SQL. AI-drafted (/new) failures are left
+    /// alone — a taxonomy problem there is a config/prompt issue, not something an editor tap
+    /// fixes. Best-effort: a failure here must never affect the already-recorded publish outcome.</summary>
+    private async Task OfferManualRepairCardAsync(long draftId, CancellationToken ct)
+    {
+        var telegram = TelegramOptions.From(configuration);
+        if (!telegram.IsConfigured)
+            return;
+
+        try
+        {
+            var view = await reviews.GetReviewViewAsync(draftId, ct);
+            if (view is not { IsManual: true })
+                return;
+
+            var keyboard = string.IsNullOrWhiteSpace(view.Category)
+                ? ManualCardKeyboard.AwaitingCategory
+                : ManualCardKeyboard.Resolved;
+            var messageId = await gateway.Value.SendManualCardAsync(
+                telegram.ReviewChatId, ReviewMessageRenderer.RenderHtml(view), draftId, keyboard,
+                scheduleButtonLabel: null, ct);
+            await reviews.SetTelegramMessageIdAsync(draftId, messageId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Could not post the metadata-repair card for draft {DraftId}", draftId);
+        }
     }
 
     // ---- Facebook leg ------------------------------------------------------------------

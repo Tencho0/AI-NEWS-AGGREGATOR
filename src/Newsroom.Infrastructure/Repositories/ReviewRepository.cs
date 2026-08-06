@@ -256,6 +256,24 @@ public sealed class ReviewRepository(
             new { messageId, pendingStatus = nameof(DraftStatus.PendingReview) });
     }
 
+    public async Task<long?> FindEditableDraftByReviewMessageAsync(long messageId, CancellationToken ct)
+    {
+        using var connection = await db.OpenAsync(ct);
+        return await connection.ExecuteScalarAsync<long?>(
+            """
+            SELECT TOP 1 Id FROM dbo.nw_Draft
+            WHERE Status IN (@pendingStatus, @publishFailedStatus)
+              AND (TelegramMessageId = @messageId OR TelegramPhotoMessageId = @messageId)
+            ORDER BY Id DESC
+            """,
+            new
+            {
+                messageId,
+                pendingStatus = nameof(DraftStatus.PendingReview),
+                publishFailedStatus = nameof(DraftStatus.PublishFailed),
+            });
+    }
+
     public async Task<bool> AttachEditorImageAsync(
         long draftId, string localPath, string fileId, long userId, string? userName,
         CancellationToken ct)
