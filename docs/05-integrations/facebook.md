@@ -15,22 +15,33 @@ the article URL + a ready-to-paste teaser text, so the editor can share into gro
 
 ## Page publishing flow
 
-1. Runs **after** successful Umbraco publish (needs the live URL).
-2. Post format (configurable per category):
-   - default: **link post** — message = headline + 1–2 sentence teaser (AI-generated with the
-     draft) + link → FB renders the OG card from the Umbraco page (`ogImage`/SEO composition
-     already exists on the site);
-   - alternative: **photo post** with text + link in message (better reach, needs image rights
-     also for FB — only images we may re-host).
-3. Store returned post id + permalink in `nw_PublishRecord`.
-4. Failure → `PartiallyPublished` (site is live, FB is not) + Telegram alert with retry button.
+Which of two independent shapes a draft gets is decided per draft by `nw_Draft.PublishTarget`
+(docs/superpowers/specs/2026-08-06-per-draft-publish-target-design.md), not by a process-wide
+switch — both queries run every cycle:
 
-## Post composition (Facebook-only mode)
+- **Link post** (`Both`-target drafts, approved ✅ — `IPublishRepository.GetPendingFacebookAsync`)
+  — runs **after** a successful Umbraco publish (needs the live URL). Post format (configurable
+  per category):
+  - default: message = headline + 1–2 sentence teaser (AI-generated with the draft) + link → FB
+    renders the OG card from the Umbraco page (`ogImage`/SEO composition already exists on the
+    site);
+  - alternative: **photo post** with text + link in message (better reach, needs image rights
+    also for FB — only images we may re-host).
+  - Failure → the draft stays `PartiallyPublished` (site is live, FB is not) + Telegram alert
+    telling the editor the site is up and to post the page manually.
+- **Standalone post** (`Facebook`-target drafts, approved 📘 Само ФБ —
+  `IPublishRepository.GetApprovedForFacebookAsync`) — posts straight from `Approved`, no site
+  step, no link; see "Post composition" below. Failure → nothing is published anywhere (the
+  draft demotes `Approved → PublishFailed`) + a Telegram alert that says so explicitly.
 
-While `Publishing:FacebookOnly` is on (temporary switch, decision-log 2026-07-08;
-`runbooks/start-the-worker.md` §5) the Umbraco leg above is skipped entirely and the Facebook
-leg becomes the whole pipeline — Approved drafts post straight to the page, no site link. The
-composed message follows a strict priority per draft:
+Either way: store the returned post id + permalink in `nw_PublishRecord`.
+
+## Post composition (standalone Facebook posts)
+
+Drafts approved 📘 Само ФБ post straight to the page with no site publish and no link, in every
+mode — this is not something `Publishing:FacebookOnly` turns on (see "Interaction with
+Publishing:FacebookOnly" below for what the flag actually does). The composed message follows a
+strict priority per draft:
 
 1. **Editor `/post` drafts** (`PromptVersion = editor-v1`) — body published verbatim (unchanged).
 2. **Caption drafts** (`nw_Draft.FacebookCaption` set; `draft-v2`+) — the post is
@@ -42,17 +53,28 @@ composed message follows a strict priority per draft:
    the *only* format before the 2026-07-17 engagement round; it now only drains the in-flight
    backlog of older drafts.
 
-When the site leg returns (`Publishing:FacebookOnly=false`), `GetPendingFacebookAsync` applies
-the same priority to the link post: a caption-carrying draft posts the caption + hashtags with
-no headline (still with the `link`); a caption-less draft keeps the short teaser + headline
-described under "Page publishing flow" above.
+`GetPendingFacebookAsync` applies the same priority to the link post for `Both` drafts once their
+site publish has succeeded: a caption-carrying draft posts the caption + hashtags with no headline
+(still with the `link`); a caption-less draft keeps the short teaser + headline described under
+"Page publishing flow" above.
+
+### Interaction with `Publishing:FacebookOnly`
+
+`Publishing:FacebookOnly` survives as an ops kill-switch (temporary, decision-log 2026-07-08;
+`runbooks/start-the-worker.md` §5), and it **overrides the column for `Both` drafts only**: while
+it is on, the Umbraco leg is skipped entirely and the standalone leg above additionally accepts
+`Both` drafts, so a draft approved ✅ (or scheduled 📅, which always writes `Both`) still reaches
+the page as a standalone post instead of stalling forever on a site publish the flag has disabled.
+`Website`-target drafts (🌐 Само сайт) are **not** widened in — that button means the editor
+explicitly does not want a Facebook post, and the flag does not override it; a `Website` draft
+approved while the flag is on simply waits, still `Approved`, until the flag clears.
 
 ## Scheduling (`Facebook:Schedule`)
 
 - The review card's second keyboard row, 📅 **Насрочи HH:mm**, approves the draft gated on
   `nw_Draft.ScheduledForUtc`; the Facebook leg's publish queries (`GetApprovedForFacebookAsync`
-  in Facebook-only mode and `GetPendingFacebookAsync` in site mode) both skip a scheduled draft
-  until the slot passes (`ScheduledForUtc <= SYSUTCDATETIME()`).
+  for the standalone leg and `GetPendingFacebookAsync` for the link leg) both skip a scheduled
+  draft until the slot passes (`ScheduledForUtc <= SYSUTCDATETIME()`).
 - The suggested slot (`PublishSlotSuggester`, recomputed at press time — the label on the button
   is only advisory) is the earliest local time ≥ now + `LeadMinutes` inside a `Windows` range,
   ≥ `MinGapMinutes` from every published or scheduled post, on a day with < `MaxPerDay` posts.
@@ -79,11 +101,14 @@ described under "Page publishing flow" above.
   stage; **DryRun defaults to ON** — with credentials + DryRun the exact message/link is logged
   and the flow completes as a success marked "(пробен режим)", which is the staging mode from
   09-deployment.md.
-- **Status semantics:** Facebook not configured → `Published` on site success alone (site-only
-  operation stays first-class). Facebook configured → site success moves the draft to
-  `PartiallyPublished` until the page post succeeds (then `Published`); the site being live is
-  never blocked or rolled back by Facebook failures. Transient Graph errors retry
-  (`Facebook:MaxAttempts`, default 3); OAuth/permission errors are terminal + alert.
+- **Status semantics (`Both`-target drafts):** Facebook not configured → `Published` on site
+  success alone (site-only operation stays first-class). Facebook configured → site success moves
+  the draft to `PartiallyPublished` until the page post succeeds (then `Published`); the site
+  being live is never blocked or rolled back by Facebook failures. Transient Graph errors retry
+  (`Facebook:MaxAttempts`, default 3); OAuth/permission errors are terminal + alert. A
+  `Website`-target draft reaches `Published` on the site publish alone, regardless of Facebook
+  configuration; a `Facebook`-target draft reaches `Published` on the page post alone, with no
+  site step at all (`PublishTargets.RequiredDestinations`).
 - **Teaser** = the draft's SEO description (fallback: first ~200 chars of the body as plain
   text). Post = message "{headline}\n\n{teaser}" + `link` (OG card rendered by FB) — unless the
   draft carries a Facebook caption (see "Post composition" above), in which case the caption +

@@ -197,7 +197,7 @@ flag override the column without a second code path:
 |---|---|---|
 | `GetApprovedUnpublishedAsync('umbraco', …)` | `Both`, `Website` | *(leg skipped entirely)* |
 | `GetPendingFacebookAsync` | `Both` | *(not run — nothing reaches `PartiallyPublished`)* |
-| `GetApprovedForFacebookAsync` | `Facebook` | `Both`, `Website`, `Facebook` |
+| `GetApprovedForFacebookAsync` | `Facebook` | `Both`, `Facebook` |
 
 `RunFacebookLegAsync` stops choosing between the last two by flag and runs both each cycle,
 concatenating the results. The per-post error isolation, attempt weighting and exhaustion alerting
@@ -211,11 +211,16 @@ correctly stays there.
 
 ### Interaction with the global flag
 
-`Publishing:FacebookOnly` survives as an ops kill-switch, and it **overrides the column**: while it
-is `true` the website leg is skipped entirely and the standalone-FB query accepts every target, so
-a draft approved as `Both` (or scheduled with 📅, which always writes `Both`) still reaches the
-page as a standalone post instead of stalling forever waiting for a site publish that will never
-run. Required destinations collapse to `[facebook]` for every draft.
+`Publishing:FacebookOnly` survives as an ops kill-switch, and it **overrides the column for `Both`
+drafts only**: while it is `true` the website leg is skipped entirely and the standalone-FB query
+additionally accepts `Both`, so a draft approved as `Both` (or scheduled with 📅, which always
+writes `Both`) still reaches the page as a standalone post instead of stalling forever waiting for
+a site publish that will never run. `Website` is deliberately **not** widened in: 🌐 Само сайт is
+the editor's explicit "not Facebook", and the flag is an ops kill-switch, not license to override
+that choice — a `Website` draft approved while the flag is on simply waits, still `Approved`,
+selected by neither leg, until the flag clears. Required destinations collapse to `[facebook]` for
+every draft, but that only matters for drafts the standalone leg actually selects — a waiting
+`Website` draft never reaches `RecordSuccessAsync` under the flag, so it never gets there.
 
 Each target button is offered only when the worker can actually honour it, so a card can never
 promise a destination that publishes nowhere. 🌐 Само сайт is dropped while the flag is on. 📘
