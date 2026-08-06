@@ -165,11 +165,20 @@ try
     builder.Services.AddSingleton(_ => new Lazy<ITelegramGateway>(() =>
     {
         var draftingOptions = GeminiDraftingOptions.From(builder.Configuration);
+        // Offer a target button only when PublishJob would actually honour it, so the keyboard
+        // can never promise a destination that publishes nowhere. Mirrors the publishing wiring
+        // below: the sandbox forces FacebookOnly off (ADR-0014), so the site button is always
+        // live there. ✅ and 📅 keep meaning "publish everywhere possible" in every case.
+        var websiteEnabled = sandbox.Enabled
+            || !PublishingOptions.From(builder.Configuration).FacebookOnly;
+        var facebookEnabled = FacebookOptions.From(builder.Configuration).IsConfigured;
         ITelegramGateway gateway = new TelegramGateway(
             TelegramOptions.From(builder.Configuration).BotToken
                 ?? throw new InvalidOperationException("Telegram:BotToken is not configured."),
             draftingOptions.Categories,
-            draftingOptions.Regions);
+            draftingOptions.Regions,
+            websiteEnabled,
+            facebookEnabled);
         // Wrapping the gateway (not the renderer) also marks watchdog alerts and the daily digest.
         return sandbox.Enabled ? new SandboxTelegramGateway(gateway) : gateway;
     }));

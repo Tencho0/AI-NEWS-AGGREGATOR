@@ -1,3 +1,4 @@
+using Newsroom.Core.Publishing;
 using Newsroom.Core.Review;
 
 using Telegram.Bot;
@@ -14,7 +15,8 @@ namespace Newsroom.Infrastructure.Review;
 /// <see cref="ReviewUpdateRouter"/>/<see cref="ReviewMessageRenderer"/> plus the TelegramJob.
 /// </summary>
 public sealed class TelegramGateway(
-    string botToken, IReadOnlyList<string> categories, IReadOnlyList<string> regions) : ITelegramGateway
+    string botToken, IReadOnlyList<string> categories, IReadOnlyList<string> regions,
+    bool websiteEnabled, bool facebookEnabled) : ITelegramGateway
 {
     private static readonly LinkPreviewOptions NoPreview = new() { IsDisabled = true };
 
@@ -89,6 +91,8 @@ public sealed class TelegramGateway(
                     InlineKeyboardButton.WithCallbackData("❌ Откажи", $"reject:{draftId}"),
                 ],
             ];
+            if (TargetRow(draftId) is { } targetRow)
+                rows.Add(targetRow);
             if (scheduleButtonLabel is not null)
                 rows.Add([InlineKeyboardButton.WithCallbackData(scheduleButtonLabel, $"schedule:{draftId}")]);
             keyboard = new InlineKeyboardMarkup(rows);
@@ -150,9 +154,11 @@ public sealed class TelegramGateway(
             cancellationToken: ct);
     }
 
-    /// <summary>AwaitingCategory: category-picker rows + ✏️/❌ (no ✅/📅). Resolved: the normal
-    /// ✅/✏️/❌(/📅) row plus 🏷. Expanded: Resolved's rows plus category and region picker rows
-    /// appended below.</summary>
+    /// <summary>AwaitingCategory: category-picker rows + ✏️/❌ (no ✅/📅), plus 📘 alone when
+    /// Facebook is configured (no ✅/🌐 — those publish to the site, which rejects a
+    /// categoryless draft). Resolved: the normal ✅/✏️/❌ row, the 🌐/📘 target row, then (/📅)
+    /// and 🏷. Expanded: Resolved's rows plus category and region picker rows appended
+    /// below.</summary>
     private InlineKeyboardMarkup BuildManualKeyboard(
         long draftId, ManualCardKeyboard keyboard, string? scheduleButtonLabel)
     {
@@ -164,6 +170,12 @@ public sealed class TelegramGateway(
                 InlineKeyboardButton.WithCallbackData("✏️ Промени", $"changes:{draftId}"),
                 InlineKeyboardButton.WithCallbackData("❌ Откажи", $"reject:{draftId}"),
             ]);
+            // No ✅ and no 🌐 — those publish to the site, which rejects a draft with no
+            // category. 📘 has no such requirement, so a quick page post stays one tap away —
+            // but only when Facebook is actually configured, or the draft would go nowhere.
+            if (facebookEnabled)
+                rows.Add([InlineKeyboardButton.WithCallbackData(
+                    "📘 Само ФБ", $"approve:{draftId}:{PublishTargets.FacebookToken}")]);
         }
         else
         {
@@ -172,6 +184,8 @@ public sealed class TelegramGateway(
                 InlineKeyboardButton.WithCallbackData("✏️ Промени", $"changes:{draftId}"),
                 InlineKeyboardButton.WithCallbackData("❌ Откажи", $"reject:{draftId}"),
             ]);
+            if (TargetRow(draftId) is { } targetRow)
+                rows.Add(targetRow);
             if (scheduleButtonLabel is not null)
                 rows.Add([InlineKeyboardButton.WithCallbackData(scheduleButtonLabel, $"schedule:{draftId}")]);
             rows.Add([InlineKeyboardButton.WithCallbackData("🏷 Категория/Регион/Тагове", $"meta:{draftId}")]);
@@ -185,6 +199,27 @@ public sealed class TelegramGateway(
         }
 
         return new InlineKeyboardMarkup(rows);
+    }
+
+    /// <summary>The per-draft target row: 🌐 publishes to the site only, 📘 to the page only.
+    /// The ✅ button above them keeps meaning "site, then the link to Facebook".
+    /// <para>Each button is offered only when the worker can actually honour it — a card must
+    /// never promise a destination that publishes nowhere. 🌐 is dropped while
+    /// <c>Publishing:FacebookOnly</c> is on (the website leg is skipped outright); 📘 is dropped
+    /// when Facebook is unconfigured, because <c>PublishJob.RunCycleAsync</c> then skips the
+    /// Facebook leg while the Umbraco leg's target filter excludes Facebook-only drafts — such a
+    /// draft would sit Approved forever, selected by nothing. Returns null when neither applies,
+    /// so no empty keyboard row is emitted (Telegram rejects those).</para></summary>
+    private InlineKeyboardButton[]? TargetRow(long draftId)
+    {
+        List<InlineKeyboardButton> row = [];
+        if (websiteEnabled)
+            row.Add(InlineKeyboardButton.WithCallbackData(
+                "🌐 Само сайт", $"approve:{draftId}:{PublishTargets.WebsiteToken}"));
+        if (facebookEnabled)
+            row.Add(InlineKeyboardButton.WithCallbackData(
+                "📘 Само ФБ", $"approve:{draftId}:{PublishTargets.FacebookToken}"));
+        return row.Count > 0 ? row.ToArray() : null;
     }
 
     /// <summary>Two buttons per row, callback_data "{prefix}:{draftId}:{index}" — index is the
