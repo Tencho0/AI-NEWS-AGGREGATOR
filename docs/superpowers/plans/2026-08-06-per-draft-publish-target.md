@@ -794,18 +794,20 @@ git commit -m "feat(publish): route each draft by its own publish target"
 
 **Interfaces:**
 - Consumes: `PublishTargets.WebsiteToken` / `.FacebookToken` (Task 1); the router's three-segment form (Task 3).
-- Produces: `TelegramGateway(string botToken, IReadOnlyList<string> categories, IReadOnlyList<string> regions, bool websiteEnabled)`.
+- Produces: `TelegramGateway(string botToken, IReadOnlyList<string> categories, IReadOnlyList<string> regions, bool websiteEnabled, bool facebookEnabled)`.
 
 `TelegramGateway` is deliberately logic-free and untested (its own class comment says so) — verification is the sandbox run in Task 9.
 
-- [ ] **Step 1: Add the `websiteEnabled` constructor parameter**
+> **Amended after Task 5's review (2026-08-06).** The original plan gated only 🌐, on `Publishing:FacebookOnly`. Task 5's reviewer found the mirror-image hole: with Facebook **unconfigured** and `FacebookOnly` off, a draft approved as `Facebook` is selected by *no* leg — `PublishTargets.UmbracoLeg` excludes it, and `RunCycleAsync` skips the Facebook leg entirely on `!facebookOptions.IsConfigured`. It would sit `Approved` forever with no alert. Both buttons are therefore gated, on the same principle the spec already states: a card must never offer a destination the worker will not publish to.
+
+- [ ] **Step 1: Add the two availability flags to the constructor**
 
 In `src/Newsroom.Infrastructure/Review/TelegramGateway.cs`, add `using Newsroom.Core.Publishing;` next to the existing `using Newsroom.Core.Review;`, then extend the primary constructor:
 
 ```csharp
 public sealed class TelegramGateway(
     string botToken, IReadOnlyList<string> categories, IReadOnlyList<string> regions,
-    bool websiteEnabled) : ITelegramGateway
+    bool websiteEnabled, bool facebookEnabled) : ITelegramGateway
 ```
 
 - [ ] **Step 2: Add the shared target-row helper**
@@ -814,18 +816,24 @@ In the same file, next to `PickerRows` (around line 193), add:
 
 ```csharp
     /// <summary>The per-draft target row: 🌐 publishes to the site only, 📘 to the page only.
-    /// The ✅ button above them keeps meaning "site, then the link to Facebook". 🌐 is omitted
-    /// while Publishing:FacebookOnly is on — it is the one button that would promise something
-    /// the worker will not do (docs/superpowers/specs/2026-08-06-per-draft-publish-target-design.md).</summary>
-    private InlineKeyboardButton[] TargetRow(long draftId)
+    /// The ✅ button above them keeps meaning "site, then the link to Facebook".
+    /// <para>Each button is offered only when the worker can actually honour it — a card must
+    /// never promise a destination that publishes nowhere. 🌐 is dropped while
+    /// <c>Publishing:FacebookOnly</c> is on (the website leg is skipped outright); 📘 is dropped
+    /// when Facebook is unconfigured, because <c>PublishJob.RunCycleAsync</c> then skips the
+    /// Facebook leg while the Umbraco leg's target filter excludes Facebook-only drafts — such a
+    /// draft would sit Approved forever, selected by nothing. Returns null when neither applies,
+    /// so no empty keyboard row is emitted (Telegram rejects those).</para></summary>
+    private InlineKeyboardButton[]? TargetRow(long draftId)
     {
         List<InlineKeyboardButton> row = [];
         if (websiteEnabled)
             row.Add(InlineKeyboardButton.WithCallbackData(
                 "🌐 Само сайт", $"approve:{draftId}:{PublishTargets.WebsiteToken}"));
-        row.Add(InlineKeyboardButton.WithCallbackData(
-            "📘 Само ФБ", $"approve:{draftId}:{PublishTargets.FacebookToken}"));
-        return row.ToArray();
+        if (facebookEnabled)
+            row.Add(InlineKeyboardButton.WithCallbackData(
+                "📘 Само ФБ", $"approve:{draftId}:{PublishTargets.FacebookToken}"));
+        return row.Count > 0 ? row.ToArray() : null;
     }
 ```
 
@@ -834,7 +842,8 @@ In the same file, next to `PickerRows` (around line 193), add:
 In `SendHtmlAsync`, insert the target row between the main row and the schedule row (i.e. immediately after the `rows` list initialiser at line 91 and before the `if (scheduleButtonLabel is not null)` check):
 
 ```csharp
-            rows.Add(TargetRow(draftId));
+            if (TargetRow(draftId) is { } targetRow)
+                rows.Add(targetRow);
             if (scheduleButtonLabel is not null)
                 rows.Add([InlineKeyboardButton.WithCallbackData(scheduleButtonLabel, $"schedule:{draftId}")]);
 ```
@@ -851,9 +860,11 @@ In `BuildManualKeyboard`, the `AwaitingCategory` branch gets 📘 only — a Fac
                 InlineKeyboardButton.WithCallbackData("❌ Откажи", $"reject:{draftId}"),
             ]);
             // No ✅ and no 🌐 — those publish to the site, which rejects a draft with no
-            // category. 📘 has no such requirement, so a quick page post stays one tap away.
-            rows.Add([InlineKeyboardButton.WithCallbackData(
-                "📘 Само ФБ", $"approve:{draftId}:{PublishTargets.FacebookToken}")]);
+            // category. 📘 has no such requirement, so a quick page post stays one tap away —
+            // but only when Facebook is actually configured, or the draft would go nowhere.
+            if (facebookEnabled)
+                rows.Add([InlineKeyboardButton.WithCallbackData(
+                    "📘 Само ФБ", $"approve:{draftId}:{PublishTargets.FacebookToken}")]);
         }
         else
         {
@@ -862,7 +873,8 @@ In `BuildManualKeyboard`, the `AwaitingCategory` branch gets 📘 only — a Fac
                 InlineKeyboardButton.WithCallbackData("✏️ Промени", $"changes:{draftId}"),
                 InlineKeyboardButton.WithCallbackData("❌ Откажи", $"reject:{draftId}"),
             ]);
-            rows.Add(TargetRow(draftId));
+            if (TargetRow(draftId) is { } targetRow)
+                rows.Add(targetRow);
             if (scheduleButtonLabel is not null)
                 rows.Add([InlineKeyboardButton.WithCallbackData(scheduleButtonLabel, $"schedule:{draftId}")]);
             rows.Add([InlineKeyboardButton.WithCallbackData("🏷 Категория/Регион/Тагове", $"meta:{draftId}")]);
@@ -879,23 +891,28 @@ In `src/Newsroom.Worker/Program.cs`, inside the `Lazy<ITelegramGateway>` factory
     builder.Services.AddSingleton(_ => new Lazy<ITelegramGateway>(() =>
     {
         var draftingOptions = GeminiDraftingOptions.From(builder.Configuration);
-        // Mirrors the publishing wiring below: the sandbox forces FacebookOnly off (ADR-0014),
-        // so the site button is always live there. Hiding 🌐 is the only card change the flag
-        // makes — ✅ and 📅 keep meaning "publish everywhere possible".
+        // Offer a target button only when PublishJob would actually honour it, so the keyboard
+        // can never promise a destination that publishes nowhere. Mirrors the publishing wiring
+        // below: the sandbox forces FacebookOnly off (ADR-0014), so the site button is always
+        // live there. ✅ and 📅 keep meaning "publish everywhere possible" in every case.
         var websiteEnabled = sandbox.Enabled
             || !PublishingOptions.From(builder.Configuration).FacebookOnly;
+        var facebookEnabled = FacebookOptions.From(builder.Configuration).IsConfigured;
         ITelegramGateway gateway = new TelegramGateway(
             TelegramOptions.From(builder.Configuration).BotToken
                 ?? throw new InvalidOperationException("Telegram:BotToken is not configured."),
             draftingOptions.Categories,
             draftingOptions.Regions,
-            websiteEnabled);
+            websiteEnabled,
+            facebookEnabled);
         // Wrapping the gateway (not the renderer) also marks watchdog alerts and the daily digest.
         return sandbox.Enabled ? new SandboxTelegramGateway(gateway) : gateway;
     }));
 ```
 
-Add `using Newsroom.Infrastructure.Publishing;` to `Program.cs` if `PublishingOptions` is not already in scope there.
+Add `using Newsroom.Infrastructure.Publishing;` to `Program.cs` if `PublishingOptions` / `FacebookOptions` are not already in scope there.
+
+Note `facebookEnabled` reads `IsConfigured` only — **not** `DryRun`. Dry-run Facebook is still a destination the worker processes (it records the publish and reports it), so the button must stay; the sandbox depends on exactly that.
 
 - [ ] **Step 6: Build and run the full suite**
 
