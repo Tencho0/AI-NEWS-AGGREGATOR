@@ -1,3 +1,5 @@
+using Newsroom.Core.Publishing;
+
 namespace Newsroom.Core.Review;
 
 /// <summary>
@@ -145,8 +147,11 @@ public interface IReviewRepository
     Task<IReadOnlyList<(long DraftId, string TopicLabel, string Error)>> GetUnreportedRegenFailuresAsync(
         int max, CancellationToken ct);
 
-    /// <summary>PendingReview → Approved. False when the draft is not PendingReview.</summary>
-    Task<bool> TryApproveAsync(long draftId, long userId, string? userName, CancellationToken ct);
+    /// <summary>PendingReview → Approved, recording the editor's chosen destination set in
+    /// nw_Draft.PublishTarget in the same statement — a draft can never be Approved carrying a
+    /// stale target. False when the draft is not PendingReview.</summary>
+    Task<bool> TryApproveAsync(
+        long draftId, PublishTarget target, long userId, string? userName, CancellationToken ct);
 
     /// <summary>PendingReview → Rejected. False when the draft is not PendingReview.</summary>
     Task<bool> TryRejectAsync(long draftId, long userId, string? userName, CancellationToken ct);

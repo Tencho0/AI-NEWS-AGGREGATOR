@@ -335,8 +335,38 @@ public sealed class ReviewRepository(
         };
     }
 
-    public Task<bool> TryApproveAsync(long draftId, long userId, string? userName, CancellationToken ct) =>
-        TryResolveAsync(draftId, DraftStatus.Approved, "Approved", userId, userName, ct);
+    public async Task<bool> TryApproveAsync(
+        long draftId, PublishTarget target, long userId, string? userName, CancellationToken ct)
+    {
+        using var connection = await db.OpenAsync(ct);
+        using var transaction = connection.BeginTransaction();
+
+        // Status and PublishTarget move together: one statement, so the publish queries can never
+        // see an Approved draft carrying the previous target. The PendingReview guard is the same
+        // idempotency contract as TryResolveAsync — double-taps still return false.
+        var rows = await connection.ExecuteAsync(
+            """
+            UPDATE dbo.nw_Draft
+            SET Status = @approvedStatus, PublishTarget = @target, UpdatedAtUtc = SYSUTCDATETIME()
+            WHERE Id = @draftId AND Status = @pendingStatus
+            """,
+            new
+            {
+                draftId,
+                target = PublishTargets.Name(target),
+                approvedStatus = nameof(DraftStatus.Approved),
+                pendingStatus = nameof(DraftStatus.PendingReview),
+            },
+            transaction);
+        if (rows == 0)
+            return false; // not PendingReview (double-tap or stale button); transaction rolls back
+
+        await InsertReviewActionAsync(connection, transaction, draftId, userId, userName,
+            "Approved", PublishTargets.Name(target));
+
+        transaction.Commit();
+        return true;
+    }
 
     public Task<bool> TryRejectAsync(long draftId, long userId, string? userName, CancellationToken ct) =>
         TryResolveAsync(draftId, DraftStatus.Rejected, "Rejected", userId, userName, ct);
@@ -393,13 +423,16 @@ public sealed class ReviewRepository(
             """
             UPDATE dbo.nw_Draft
             SET Status = @approvedStatus, ScheduledForUtc = @scheduledForUtc,
-                UpdatedAtUtc = SYSUTCDATETIME()
+                PublishTarget = @target, UpdatedAtUtc = SYSUTCDATETIME()
             WHERE Id = @draftId AND Status = @pendingStatus
             """,
             new
             {
                 draftId,
                 scheduledForUtc,
+                // 📅 is defined as the both-destinations path; stating it beats leaning on the
+                // column default, and it re-asserts Both if the row somehow carried anything else.
+                target = PublishTargets.Name(PublishTarget.Both),
                 approvedStatus = nameof(DraftStatus.Approved),
                 pendingStatus = nameof(DraftStatus.PendingReview),
             },

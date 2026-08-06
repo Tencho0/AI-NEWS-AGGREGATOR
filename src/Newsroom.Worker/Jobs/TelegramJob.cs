@@ -295,7 +295,7 @@ public sealed class TelegramJob(
                 // TryApprove: the normal PendingReview → Approved path. TryUnschedule: ✅ on an
                 // already-📅-scheduled draft clears the gate — "now" beats the slot by design.
                 var transitioned =
-                    await reviews.TryApproveAsync(approve.DraftId, callback.UserId, callback.UserName, ct)
+                    await reviews.TryApproveAsync(approve.DraftId, approve.Target, callback.UserId, callback.UserName, ct)
                     || await reviews.TryUnscheduleAsync(approve.DraftId, callback.UserId, callback.UserName, ct);
                 await ResolveDraftAsync(callback, approve.DraftId, transitioned,
                     toast: "✅ Одобрено", statusLine: $"✅ Одобрено от {editor}", ct);
