@@ -61,13 +61,18 @@ public class PublishTargetsTests
     }
 
     [Fact]
-    public void FacebookOnly_makes_the_standalone_leg_serve_every_target()
+    public void FacebookOnly_widens_the_standalone_leg_to_admit_Both_but_never_Website()
     {
+        var widened = PublishTargets.FacebookStandaloneLeg(facebookOnly: true);
+
         // Without this, a draft approved as Both — or scheduled with 📅, which always writes
         // Both — would wait forever under the flag for a site publish that never runs.
-        Assert.Equal(
-            new[] { "Both", "Website", "Facebook" },
-            PublishTargets.FacebookStandaloneLeg(facebookOnly: true));
+        Assert.Equal(new[] { "Both", "Facebook" }, widened);
+
+        // 🌐 Само сайт is the editor's explicit "not Facebook"; the flag is an ops kill-switch,
+        // not license to override that choice, so a Website draft must keep waiting instead of
+        // being posted to the page.
+        Assert.DoesNotContain("Website", widened);
     }
 
     [Fact]

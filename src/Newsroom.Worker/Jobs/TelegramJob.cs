@@ -297,10 +297,19 @@ public sealed class TelegramJob(
 
                 // TryApprove: the normal PendingReview → Approved path, now carrying the target.
                 // TryUnschedule: ✅ on an already-📅-scheduled draft clears the gate — "now" beats
-                // the slot by design, and that draft is already Both.
+                // the slot by design, and that draft is already Both. Gated on Both because
+                // TryUnscheduleAsync does not (and must not) touch PublishTarget: a scheduled
+                // draft is Both by construction, so clearing the schedule needs no target write.
+                // But 🌐/📘 pressed on that same scheduled draft would otherwise take this branch
+                // too (TryApproveAsync fails — already Approved) and edit the card to claim a
+                // narrower target while the row stays Both, publishing the opposite of what the
+                // editor was just told. Restricting the fallthrough to Both makes 🌐/📘 on a
+                // scheduled draft fall through to the "Вече обработено" toast instead — honest,
+                // if unhelpful; narrowing an already-scheduled draft is not supported.
                 var transitioned =
                     await reviews.TryApproveAsync(approve.DraftId, approve.Target, callback.UserId, callback.UserName, ct)
-                    || await reviews.TryUnscheduleAsync(approve.DraftId, callback.UserId, callback.UserName, ct);
+                    || (approve.Target is PublishTarget.Both
+                        && await reviews.TryUnscheduleAsync(approve.DraftId, callback.UserId, callback.UserName, ct));
                 var targetSuffix = TargetSuffix(approve.Target);
                 await ResolveDraftAsync(callback, approve.DraftId, transitioned,
                     toast: $"✅ Одобрено{targetSuffix}", statusLine: $"✅ Одобрено{targetSuffix} от {editor}", ct);

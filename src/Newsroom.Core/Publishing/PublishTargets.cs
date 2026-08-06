@@ -55,11 +55,14 @@ public static class PublishTargets
 
     /// <summary>Targets served by the standalone (no link) Facebook leg
     /// (IPublishRepository.GetApprovedForFacebookAsync). Under <c>Publishing:FacebookOnly</c> the
-    /// flag overrides the column and every draft comes this way — otherwise a draft approved as
-    /// Both, or scheduled with 📅 (which always writes Both), would wait forever for a site
-    /// publish the flag has disabled.</summary>
+    /// flag widens the column to also admit Both — otherwise a draft approved as Both, or
+    /// scheduled with 📅 (which always writes Both), would wait forever for a site publish the
+    /// flag has disabled. Website is deliberately never admitted here, flag or no flag: 🌐 Само
+    /// сайт is the editor's explicit "not Facebook", and a Website draft has nowhere legitimate
+    /// to go while the site leg is off — it waits for the flag to clear rather than being posted
+    /// to the page anyway.</summary>
     public static IReadOnlyList<string> FacebookStandaloneLeg(bool facebookOnly) => facebookOnly
-        ? [nameof(PublishTarget.Both), nameof(PublishTarget.Website), nameof(PublishTarget.Facebook)]
+        ? [nameof(PublishTarget.Both), nameof(PublishTarget.Facebook)]
         : [nameof(PublishTarget.Facebook)];
 
     /// <summary>What must succeed before THIS draft counts as Published — the per-draft
