@@ -242,12 +242,22 @@ draft never enters.
 
 ## Testing
 
+**Constraint discovered while planning:** this repo has **no database integration-test harness.**
+`PublishRepositoryTests` and `ReviewRepositoryTests` are pure unit tests over static helpers
+(`FileNameFromUrl`, `FormatQuotaSummary`); the "Integration (DB) / local SQL Express" layer in
+docs/08-testing.md is aspirational, not built. Adding one is out of scope for this feature.
+
+The response is to make the routing rules pure rather than to test SQL: every decision — which
+targets each leg accepts, what `RequiredDestinations` returns for a given target — lives in one
+static class, `PublishTargets`, which `PublishJob` and `PublishRepository` both read instead of
+re-deriving. That class is densely unit-tested; the SQL that consumes its output is verified by
+the sandbox run.
+
 | Area | Cases |
 |---|---|
-| `ReviewUpdateRouterTests` | `approve:{id}` → `ApproveDraft(id, Both)`; `:site` → `Website`; `:fb` → `Facebook`; `:xyz` and a 4-segment form → `Ignore(ReasonUnknownData)` |
-| `ReviewRepositoryTests` | `TryApproveAsync` persists status + target together; the `nw_ReviewAction` comment carries the target; a second call on an Approved draft still returns false (idempotency contract intact) |
-| `PublishRepositoryTests` | each of the three queries respects the targets it is passed — in particular that a `Facebook` draft never surfaces in the umbraco query, a `Website` draft never surfaces in either Facebook query, a `Both` draft behaves exactly as it does today, and `GetApprovedForFacebookAsync` given all three targets (the `FacebookOnly` override) returns a `Both` draft |
-| `PublishJob` required-destinations mapping | `Website` → `Published` after the site publish alone; `Both` with FB configured → `PartiallyPublished` until the page post lands; `FacebookOnly` collapses every target to `[facebook]` |
+| `PublishTargetsTests` (new) | callback-token parsing (`site`/`fb`, and that nothing else parses); `Parse` of the persisted column, falling back to `Both` on NULL/garbage; the accepted-target list of each of the three legs; the `FacebookOnly` widening of the standalone leg; `RequiredDestinations` for all three targets × FB configured/not × flag on/off |
+| `ReviewUpdateRouterTests` | `approve:{id}` → `ApproveDraft(id, Both)`; `:site` → `Website`; `:fb` → `Facebook`; `:xyz`, `:` and a 4-segment form → `Ignore(ReasonUnknownData)` |
+| Sandbox end-to-end (manual, ADR-0014) | migration 0016 applies; the card shows the new row; 🌐 publishes to the local site only and reaches `Published`; 📘 dry-run-posts to Facebook only with no site publish; ✅ behaves exactly as before; 📘 works on an `AwaitingCategory` `/post` card |
 
 ## Files touched
 
