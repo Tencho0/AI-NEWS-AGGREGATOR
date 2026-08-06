@@ -158,6 +158,25 @@ try
     builder.Services.AddSingleton<IOperatorAlerts, TelegramOperatorAlerts>();
     builder.Services.AddSingleton<FeaturedImageService>();
 
+    // Publishing options (docs/02-functional-spec.md §6, ADR-0007/0008), computed once here so
+    // every consumer reads the same effective values instead of each re-deriving the sandbox rule
+    // — the Telegram gateway's target-button gating just below, and PublishJob itself further
+    // down, used to compute this independently, and two copies of one rule drift.
+    //
+    // Sandbox overrides configuration rather than trusting it (ADR-0014): DryRun on means
+    // FacebookPublisher takes its existing dry-run branch and never calls the Graph API, whatever
+    // a stray token in configuration says; FacebookOnly off is required because it would
+    // otherwise skip the Umbraco leg entirely — and publishing to the local site is the point.
+    var facebookOptions = FacebookOptions.From(builder.Configuration);
+    var publishingOptions = PublishingOptions.From(builder.Configuration);
+    if (sandbox.Enabled)
+    {
+        facebookOptions = facebookOptions with { DryRun = true };
+        publishingOptions = publishingOptions with { FacebookOnly = false };
+    }
+    builder.Services.AddSingleton(facebookOptions);
+    builder.Services.AddSingleton(publishingOptions);
+
     // Telegram editorial review (docs/02-functional-spec.md §5, ADR-0006: long polling). The
     // gateway is Lazy on the AI-client pattern: TelegramJob guards on configuration, so a
     // missing bot token degrades to a dormant review stage instead of failing host startup.
@@ -166,12 +185,12 @@ try
     {
         var draftingOptions = GeminiDraftingOptions.From(builder.Configuration);
         // Offer a target button only when PublishJob would actually honour it, so the keyboard
-        // can never promise a destination that publishes nowhere. Mirrors the publishing wiring
-        // below: the sandbox forces FacebookOnly off (ADR-0014), so the site button is always
-        // live there. ✅ and 📅 keep meaning "publish everywhere possible" in every case.
-        var websiteEnabled = sandbox.Enabled
-            || !PublishingOptions.From(builder.Configuration).FacebookOnly;
-        var facebookEnabled = FacebookOptions.From(builder.Configuration).IsConfigured;
+        // can never promise a destination that publishes nowhere. Reads the facebookOptions /
+        // publishingOptions computed above (sandbox override already applied) instead of
+        // re-reading configuration, so there is exactly one place deciding the effective values.
+        // ✅ and 📅 keep meaning "publish everywhere possible" in every case.
+        var websiteEnabled = !publishingOptions.FacebookOnly;
+        var facebookEnabled = facebookOptions.IsConfigured;
         ITelegramGateway gateway = new TelegramGateway(
             TelegramOptions.From(builder.Configuration).BotToken
                 ?? throw new InvalidOperationException("Telegram:BotToken is not configured."),
@@ -189,20 +208,6 @@ try
     // missing BaseUrl/secret degrades to a dormant publishing stage and a missing Facebook
     // page/token to a site-only one (Facebook:DryRun additionally defaults ON).
     builder.Services.AddSingleton(UmbracoOptions.From(builder.Configuration));
-
-    // Sandbox overrides configuration rather than trusting it (ADR-0014): DryRun on means
-    // FacebookPublisher takes its existing dry-run branch and never calls the Graph API, whatever
-    // a stray token in configuration says; FacebookOnly off is required because it would
-    // otherwise skip the Umbraco leg entirely — and publishing to the local site is the point.
-    var facebookOptions = FacebookOptions.From(builder.Configuration);
-    var publishingOptions = PublishingOptions.From(builder.Configuration);
-    if (sandbox.Enabled)
-    {
-        facebookOptions = facebookOptions with { DryRun = true };
-        publishingOptions = publishingOptions with { FacebookOnly = false };
-    }
-    builder.Services.AddSingleton(facebookOptions);
-    builder.Services.AddSingleton(publishingOptions);
     builder.Services.AddSingleton<IPublishRepository, PublishRepository>();
     builder.Services.AddHttpClient<IUmbracoPublisher, UmbracoPublisher>(
             client => client.Timeout = TimeSpan.FromSeconds(30))
