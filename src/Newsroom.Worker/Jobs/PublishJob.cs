@@ -189,13 +189,14 @@ public sealed class PublishJob(
         await OfferManualRepairCardAsync(article.DraftId, ct);
     }
 
-    /// <summary>For a manual (/post) draft that just became PublishFailed: posts a fresh review
-    /// card carrying the category/region/tags picker, since the original card's buttons were
-    /// already stripped at ✅ time — this is the only live entry point back to the picker. A
-    /// category/region/tags tap on it runs DraftRepository.ReopenIfPublishFailedAsync, which puts
-    /// the draft back in the publish queue with no manual SQL. AI-drafted (/new) failures are left
-    /// alone — a taxonomy problem there is a config/prompt issue, not something an editor tap
-    /// fixes. Best-effort: a failure here must never affect the already-recorded publish outcome.</summary>
+    /// <summary>For a manual-topic draft (/post or /new — IsManual is a topic-level flag, it does
+    /// not distinguish the two, and both already carry the picker card at review time) that just
+    /// became PublishFailed: posts a fresh review card carrying the category/region/tags picker,
+    /// since the original card's buttons were already stripped at ✅ time — this is the only live
+    /// entry point back to the picker. A category/region/tags tap on it runs
+    /// DraftRepository.ReopenIfPublishFailedAsync, which puts the draft back in the publish queue
+    /// with no manual SQL. Best-effort: a failure here must never affect the already-recorded
+    /// publish outcome.</summary>
     private async Task OfferManualRepairCardAsync(long draftId, CancellationToken ct)
     {
         var telegram = TelegramOptions.From(configuration);
